@@ -1,27 +1,51 @@
-# GrimLegacyAC default config
-# 1.7.10 focused baseline checks inspired by Grim architecture ideas.
+# GrimLegacyAC 默认配置
+# 目标环境: Spigot 1.7.10 + ProtocolLib
+#
+# 调参建议:
+# 1. 先看 alerts / debug / checks.Speed / checks.Reach / checks.Velocity / checks.Prediction
+# 2. pipeline / prediction.budget / adaptive-lag 属于底层参数，不建议频繁大改
+# 3. 想降误报，优先调 buffer / punish-vl；不要一上来就把 threshold 拉得特别大
+
 violation-decay-per-second: 0.08
 
 alerts:
+  # 是否把报警输出到控制台
   console: true
+  # 是否要求管理员先执行 /glac alerts 才能收到服内报警
   require-subscription: false
+  # 报警中是否显示触发来源，例如 CLIENT_MOVEMENT / USE_ENTITY_PACKET
+  include-source: true
+  # 报警中是否显示预算场景标签；平时建议关，排查误报时再开
+  include-budget: false
+  # 报警详情的最大长度，超过会自动截断
+  detail-max-length: 120
 
 protocollib:
+  # 1.7.10 推荐保持开启，作为主包前置
   enabled: true
   strict-reflection: false
 
 netty:
+  # 仅作为降级路径，不建议把它当成完整替代方案
   inject-on-join: true
   strict-reflection: false
 
-# packet-first 娴兼ê鍘涙担璺ㄦ暏閸栧懐楠囨禍瀣╂閿涙稑缍嬮崗鑸垫殶閹诡喛绻冮張鐔稿灗缂傚搫銇戦弮璁圭礉 stale 缁愭褰涢崶鐐衡偓鈧?Bukkit 娴滃娆?
+# packet-first 主链路
+# 正常情况下 movement / place / dig / combat 都优先走 packet-first。
+# Bukkit MoveEvent 只在 packet 数据缺失或 stale 时做兜底。
 pipeline:
+  # 是否优先使用 packet-first movement pipeline
   packet-first: true
+  # 是否保留 Bukkit MoveEvent 兜底
   bukkit-fallback: true
+  # 距离上一次 packet movement 超过这个时间，才允许 Bukkit fallback 介入
   bukkit-fallback-stale-nanos: 150000000
+  # 旧 onMove fallback。默认关闭，除非你在排查 prediction 缺帧问题
   legacy-onmove-fallback: false
+  # prediction 没准备好时，是否运行一套极简 post checks
   minimal-post-on-prediction-miss: true
   minimal-post:
+    # 下面这组是 prediction miss 时的保守阈值，不建议频繁调
     thresholds:
       speed-horizontal: 0.85
       speed-max-dy: 0.42
@@ -42,11 +66,15 @@ pipeline:
       groundspoof-budget-multiplier: 8.0
 
 exempt:
+  # 玩家刚进服时的保护时间
   join-grace-ms: 2500
+  # teleport / setback / 珍珠后的短暂豁免
   teleport-grace-ms: 1000
+  # 服务端给速度后的短暂豁免
   velocity-grace-ms: 400
 
 prediction:
+  # movement packet 超过这个年龄还没被消费，就不再作为有效 prediction 输入
   max-packet-age-nanos: 120000000
   shadow-deviation-threshold: 0.15
   min-moving-horizontal: 0.03
@@ -63,6 +91,8 @@ prediction:
   lag-small-tolerance: 0.03
   velocity-pending-tolerance: 0.04
   recovery-after-high-fall-ticks: 8
+  # 下面这组 budget 是 prediction 主容差来源。
+  # 最常改的是: base / recent-velocity / high-fall-recovery / inventory-air / use-item-air
   budget:
     base: 0.060
     recent-velocity: 0.18
@@ -84,7 +114,8 @@ prediction:
     use-item-air: 0.05
     air-sprint-jump: 0.03
 
-# Simulation settings  mirrors Grim OffsetHandler pattern
+# Prediction / Speed 的优势累计模型
+# threshold 越小越敏感；max-advantage 越小越容易累计到处罚
 Simulation:
   threshold: 0.045
   immediate-setback-threshold: 0.30
@@ -94,27 +125,50 @@ Simulation:
   linear-decay-per-tick: 0.08
 
 transaction:
+  # 1.7.10 下 transaction 是补偿对齐核心，不建议关闭
   enabled: true
   interval-ticks: 20
   max-ack-age-ms: 4000
 
 combat:
+  # Reach 回溯窗口上限。高延迟服可以略高，但不要无限加
   backtrack-window-ms: 400
+  # 目标刚 teleport / pearl 的宽限时间
   reach-teleport-grace-ms: 500
 
 heuristics:
   window-decay: 0.90
 
 adaptive-lag:
+  # RTT 抖动 / TPS 低时，会给部分检查一点额外容差
   jitter-threshold-ms: 40
   min-tps: 18.0
   reach-extra-distance: 0.12
   speed-tolerance-multiplier: 1.35
   speed-small-margin: 0.05
   pending-state-margin: 0.10
-  compare-log-enabled: true
+  # 旧版兼容日志开关；现在建议改用下面的 debug.budget-breakdown
+  compare-log-enabled: false
+
+debug:
+  # /glac debug <player> 后，是否输出每帧 pipeline 摘要
+  pipeline-summary: true
+  # 是否输出 budget 细分日志；只在排查 prediction / lag 误报时开启
+  budget-breakdown: false
+  # 是否输出 frame context 新旧判定差异；默认关闭，避免刷屏
+  frame-context-diff: false
+  # debug 详情最大长度，超过会自动截断
+  detail-max-length: 160
 
 checks:
+  # 通用字段说明:
+  # enabled: 是否启用
+  # max-vl: 单检查累计 VL 上限
+  # setback: 达到处罚条件后是否允许回拉 / 校正
+  # buffer / window-weight: 评分累积相关，不熟悉时不要大改
+  # punish-vl: 达到该 VL 后执行 punish-commands
+
+  # 速度主检测。1.7.10 里这是最重要也最容易被误调的一项。
   Speed:
     enabled: true
     max-vl: 12.0
@@ -126,10 +180,12 @@ checks:
     linear-decay-per-tick: 0.08
     buffer: 0.45
     window-weight: 1.0
+    # 这是 Speed 在 prediction 结果上的额外基础余量，不要改太大
     prediction-base-allowance: 0.08
     punish-vl: 30
     punish-commands:
       - "kick %player% Speed cheat (%check% VL:%vl%)"
+
   Fly:
     enabled: true
     max-vl: 10.0
@@ -144,6 +200,7 @@ checks:
     punish-vl: 26
     punish-commands:
       - "kick %player% Fly cheat (%check% VL:%vl%)"
+
   Phase:
     enabled: true
     max-vl: 6.0
@@ -156,6 +213,8 @@ checks:
     punish-vl: 18
     punish-commands:
       - "kick %player% Phase cheat (%check% VL:%vl%)"
+
+  # PvP 命中距离。不要只看 Ray-Distance，一起看 combat.backtrack-window-ms。
   Reach:
     enabled: true
     max-vl: 8.0
@@ -168,6 +227,7 @@ checks:
     punish-vl: 22
     punish-commands:
       - "kick %player% Reach cheat (%check% VL:%vl%)"
+
   AutoClicker:
     enabled: true
     max-vl: 10.0
@@ -178,6 +238,7 @@ checks:
     punish-vl: 25
     punish-commands:
       - "kick %player% AutoClicker (%check% VL:%vl%)"
+
   NoFall:
     enabled: true
     max-vl: 6.0
@@ -187,6 +248,7 @@ checks:
     punish-vl: 16
     punish-commands:
       - "kick %player% NoFall cheat (%check% VL:%vl%)"
+
   KillAura:
     enabled: true
     max-vl: 7.0
@@ -199,6 +261,8 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% KillAura cheat (%check% VL:%vl%)"
+
+  # 计时类检测。误报先看 max-moves-per-second / balance-threshold-ms。
   Timer:
     enabled: true
     max-vl: 8.0
@@ -215,6 +279,8 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% Timer cheat (%check% VL:%vl%)"
+
+  # 击退窗口。高延迟服主要看 tx-window-max-ms / min-response-ratio-* / min-score-to-flag。
   Velocity:
     enabled: true
     max-vl: 8.0
@@ -237,6 +303,7 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% Velocity cheat (%check% VL:%vl%)"
+
   Jesus:
     enabled: true
     max-vl: 8.0
@@ -246,6 +313,7 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% Jesus cheat (%check% VL:%vl%)"
+
   FastPlace:
     enabled: true
     max-vl: 8.0
@@ -255,6 +323,7 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% FastPlace cheat (%check% VL:%vl%)"
+
   FastBreak:
     enabled: true
     max-vl: 8.0
@@ -264,6 +333,7 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% FastBreak cheat (%check% VL:%vl%)"
+
   FastUse:
     enabled: true
     max-vl: 8.0
@@ -273,6 +343,7 @@ checks:
     punish-vl: 14
     punish-commands:
       - "kick %player% FastUse cheat (%check% VL:%vl%)"
+
   InventoryMove:
     enabled: true
     max-vl: 8.0
@@ -286,6 +357,7 @@ checks:
     punish-commands:
       - "kick %player% InventoryMove cheat (%check% VL:%vl%)"
 
+  # Prediction 是底层主检查。若误报高，先看上面的 prediction.budget，而不是先把这里拉大。
   Prediction:
     enabled: true
     max-vl: 10.0
@@ -316,6 +388,7 @@ checks:
     enabled: true
     max-vl: 999.0
     setback: false
+
   AimModulo360:
     enabled: true
     max-vl: 8.0
@@ -324,6 +397,7 @@ checks:
     punish-vl: 18
     punish-commands:
       - "kick %player% Aim cheat (%check% VL:%vl%)"
+
   AimDuplicateLook:
     enabled: true
     max-vl: 8.0
@@ -332,6 +406,7 @@ checks:
     punish-vl: 18
     punish-commands:
       - "kick %player% Aim cheat (%check% VL:%vl%)"
+
   RotationBreak:
     enabled: true
     max-vl: 8.0
@@ -341,6 +416,7 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% RotationBreak (%check% VL:%vl%)"
+
   FarBreak:
     enabled: true
     max-vl: 8.0
@@ -350,6 +426,7 @@ checks:
     punish-vl: 20
     punish-commands:
       - "kick %player% FarBreak (%check% VL:%vl%)"
+
   AirLiquidBreak:
     enabled: true
     max-vl: 8.0
@@ -358,6 +435,7 @@ checks:
     punish-vl: 16
     punish-commands:
       - "kick %player% AirLiquidBreak (%check% VL:%vl%)"
+
   MultiBreak:
     enabled: false
     max-vl: 8.0
@@ -367,6 +445,7 @@ checks:
     punish-vl: 18
     punish-commands:
       - "kick %player% MultiBreak (%check% VL:%vl%)"
+
   DuplicateRotPlace:
     enabled: true
     max-vl: 8.0
@@ -375,6 +454,7 @@ checks:
     punish-vl: 18
     punish-commands:
       - "kick %player% Scaffold (%check% VL:%vl%)"
+
   FabricatedPlace:
     enabled: true
     max-vl: 8.0

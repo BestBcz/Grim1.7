@@ -161,9 +161,8 @@ public final class VelocityCheck extends Check {
                 + " adv=" + fmt(data.getKnockbackOffset())
                 + " buf=" + fmt(buffer);
 
-        if (data.isDebugEnabled()) {
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName() + " Velocity(KB) " + detail);
-        }
+        debug(data, player, "velocity-kb",
+                "detail", detail);
 
         boolean shouldFlag = score >= minScoreToFlag
                 || likely.getOffset() >= immediate
@@ -236,17 +235,15 @@ public final class VelocityCheck extends Check {
         }
         double buffer = slideAndAddScore(data, score, getMergedDouble("window-weight", 1.0D));
 
-        if (data.isDebugEnabled()) {
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName()
-                    + " Velocity expectedXZ=" + fmt(expectedXZ)
-                    + " observedXZ=" + fmt(observedXZ)
-                    + " ratioXZ=" + fmt(ratioXZ)
-                    + " expectedY=" + fmt(expectedY)
-                    + " observedY=" + fmt(observedY)
-                    + " ratioY=" + fmt(ratioY)
-                    + " score=" + fmt(score)
-                    + " buffer=" + fmt(buffer));
-        }
+        debug(data, player, "velocity-window",
+                "expectedXZ", fmt(expectedXZ),
+                "observedXZ", fmt(observedXZ),
+                "ratioXZ", fmt(ratioXZ),
+                "expectedY", fmt(expectedY),
+                "observedY", fmt(observedY),
+                "ratioY", fmt(ratioY),
+                "score", fmt(score),
+                "buffer", fmt(buffer));
 
         double minScoreToFlag = getMergedDouble("min-score-to-flag", getMergedDouble("buffer", 1.2D));
         if (buffer > minScoreToFlag) {

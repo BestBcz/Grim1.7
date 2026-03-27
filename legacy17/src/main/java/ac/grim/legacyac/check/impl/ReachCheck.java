@@ -159,7 +159,8 @@ public final class ReachCheck extends Check {
 
         if (!eval.isEnforceableWindow() || recentTeleportOrPearl || eval.isTeleportMarkerHit()) {
             plugin.alerts().alert(attacker, getName(), attackerData.getViolation(getName()),
-                    source + "-teleport-grace-only " + verbose + " max=" + String.format(Locale.ROOT, "%.3f", maxReach));
+                    source + "-teleport-grace-only " + verbose + " max=" + String.format(Locale.ROOT, "%.3f", maxReach),
+                    null, source);
             return;
         }
 

@@ -147,22 +147,19 @@ public final class PredictionMovementCheck extends Check {
         double offset = reducedOffset;
         String bestProfile = bestCandidate == null ? "none" : bestCandidate.getProfile();
 
-        if (data.isDebugEnabled()) {
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName()
-                    + " [Prediction] rawOffset=" + fmt(rawOffset)
-                    + " allowance=" + fmt(predictionAllowance)
-                    + " correction=" + fmt(legacyCorrection)
-                    + " reduced=" + fmt(reducedOffset)
-                    + " offset=" + fmt(offset)
-                    + " threshold=" + fmt(threshold)
-                    + " advantage=" + fmt(data.getBuffer(ADVANTAGE_KEY))
-                    + " maxAdv=" + fmt(maxAdvantage)
-                    + " h=" + fmt(horizontal)
-                    + " dY=" + fmt(deltaY)
-                    + " blocker=" + state.getPrimaryBlocker().name()
-                    + " pending=" + state.getPendingChanges()
-                    + " best=" + bestProfile);
-        }
+        debug(data, player, "prediction",
+                "raw", fmt(rawOffset),
+                "allow", fmt(predictionAllowance),
+                "corr", fmt(legacyCorrection),
+                "reduced", fmt(reducedOffset),
+                "threshold", fmt(threshold),
+                "adv", fmt(data.getBuffer(ADVANTAGE_KEY)),
+                "maxAdv", fmt(maxAdvantage),
+                "h", fmt(horizontal),
+                "dY", fmt(deltaY),
+                "blocker", state.getPrimaryBlocker().name(),
+                "pending", String.valueOf(state.getPendingChanges()),
+                "best", bestProfile);
 
         if (offset >= threshold || offset >= immediateSetbackThreshold) {
             double advantage = data.addBuffer(ADVANTAGE_KEY, offset);
@@ -186,7 +183,8 @@ public final class PredictionMovementCheck extends Check {
                         + " dY=" + fmt(deltaY));
             } else {
                 plugin.alerts().alert(player, getName(), data.getViolation(getName()),
-                        humanOffset + " adv=" + fmt(advantage) + " best=" + bestProfile);
+                        humanOffset + " adv=" + fmt(advantage) + " best=" + bestProfile,
+                        budget == null ? null : budget.getScenarioTag(), data.getDetectionSource());
             }
         } else {
             decayAdvantage(data);

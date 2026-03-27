@@ -6,6 +6,7 @@ import ac.grim.legacyac.check.impl.ReachCheck;
 import ac.grim.legacyac.combat.EntityIdIndex;
 import ac.grim.legacyac.data.FrameContextSnapshot;
 import ac.grim.legacyac.data.PlayerData;
+import ac.grim.legacyac.util.LogMessageFormatter;
 import java.util.List;
 import java.util.Locale;
 import org.bukkit.Location;
@@ -49,8 +50,10 @@ final class CombatPipeline {
         attackerData.setDetectionContext("USE_ENTITY_PACKET", attackerData.getMoveWindow());
         if (attackerData.isTeleportSyncPending()) {
             if (attackerData.isDebugEnabled()) {
-                plugin.getLogger().info("[GLAC-DEBUG] " + attacker.getName()
-                        + " attack packet blocked: teleport-sync-pending");
+                plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), attacker.getName(),
+                        "combat-skip",
+                        "reason", "teleport-sync-pending",
+                        "targetId", String.valueOf(targetEntityId)));
             }
             return;
         }
@@ -88,10 +91,13 @@ final class CombatPipeline {
 
         if (attackerData.isDebugEnabled()) {
             double baseReach = plugin.getConfig().getDouble("checks.Reach.Ray-Distance", 3.1D);
-            plugin.getLogger().info("[GLAC-DEBUG] " + attacker.getName() + " -> " + target.getName()
-                    + " Ray-Distance: " + String.format(Locale.ROOT, "%.2f", reachEval.getDirectDistance())
-                    + ", Config: " + String.format(Locale.ROOT, "%.2f", baseReach)
-                    + ", Box-Time-Offset: " + reachEval.getBoxTimeOffsetMs() + "ms");
+            plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), attacker.getName(),
+                    "reach-eval",
+                    "target", target.getName(),
+                    "dist", String.format(Locale.ROOT, "%.2f", reachEval.getDirectDistance()),
+                    "base", String.format(Locale.ROOT, "%.2f", baseReach),
+                    "offsetMs", String.valueOf(reachEval.getBoxTimeOffsetMs()),
+                    "enforce", String.valueOf(reachEval.isEnforceableWindow())));
         }
 
         plugin.getServer().getScheduler().runTask(plugin, new Runnable() {

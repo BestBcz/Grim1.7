@@ -30,6 +30,7 @@ import ac.grim.legacyac.data.PlayerData;
 import ac.grim.legacyac.data.state.CompensationState;
 import ac.grim.legacyac.network.frame.MovementFrame;
 import ac.grim.legacyac.tolerance.ToleranceBudgetEngine;
+import ac.grim.legacyac.util.LogMessageFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.DoubleSupplier;
@@ -161,7 +162,9 @@ final class MovementPipeline {
     private void executeMovementPipeline(Player player, PlayerData data, MovementFrame frame, Location from,
             Location to) {
         long pipelineStart = System.nanoTime();
-        PipelineTrace trace = data.isDebugEnabled() ? new PipelineTrace(pipelineStart, player.getName()) : null;
+        PipelineTrace trace = data.isDebugEnabled() && LogMessageFormatter.isPipelineSummaryEnabled(plugin.getConfig())
+                ? new PipelineTrace(pipelineStart, player.getName())
+                : null;
 
         data.handleMove(player, from, to, frame.isOnGround());
         data.preloadCompensatedWorld(player, 1);
@@ -195,15 +198,18 @@ final class MovementPipeline {
                 snapshot.isEnforceable());
         data.setCurrentFrameContext(frameContext);
 
-        if (data.isDebugEnabled() && plugin.getConfig().getBoolean("adaptive-lag.compare-log-enabled", false)) {
-            plugin.getLogger().info("[GLAC-BUDGET] " + player.getName() + " " + budget.toDebugString());
+        if (data.isDebugEnabled() && LogMessageFormatter.isBudgetBreakdownEnabled(plugin.getConfig())) {
+            plugin.getLogger().info("[GLAC-BUDGET] " + player.getName() + " | " + budget.toDebugString());
         }
 
         if (!snapshot.isTeleportAligned()) {
             String reason = snapshot.getPrimaryBlocker().name().toLowerCase(Locale.ROOT) + "-not-aligned";
             if (data.isDebugEnabled()) {
-                plugin.getLogger().info("[GLAC-DEBUG] " + player.getName()
-                        + " checks SKIPPED: " + reason + " pending=" + snapshot.getPendingChanges());
+                plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(),
+                        "pipeline-skip",
+                        "reason", reason,
+                        "blocker", snapshot.getPrimaryBlocker().name(),
+                        "pending", String.valueOf(snapshot.getPendingChanges())));
             }
             if (trace != null) {
                 trace.addEntry("*", CheckStage.PRE, PipelineTrace.Status.SKIPPED, 0L, reason);
@@ -217,12 +223,13 @@ final class MovementPipeline {
         runQueuedBlockInteractionChecks(player, data, trace);
         boolean predictionReady = runMovementPrediction(player, frame, to, data, trace);
         boolean oldPredictionReady = data.hasPredictionForFrame(frame.getTimestampNanos());
-        if (plugin.getConfig().getBoolean("pipeline.frame-context.dual-track-log", true)
+        if (LogMessageFormatter.isFrameContextDiffEnabled(plugin.getConfig())
                 && predictionReady != oldPredictionReady) {
-            plugin.getLogger().info("[GLAC-FRAMECTX-DIFF] " + player.getName()
-                    + " frame=" + frame.getTimestampNanos()
-                    + " oldPredictionReady=" + oldPredictionReady
-                    + " newPredictionReady=" + predictionReady);
+            plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(),
+                    "framectx-diff",
+                    "frame", String.valueOf(frame.getTimestampNanos()),
+                    "oldReady", String.valueOf(oldPredictionReady),
+                    "newReady", String.valueOf(predictionReady)));
         }
         data.updateKnockbackStages();
 
@@ -424,8 +431,11 @@ final class MovementPipeline {
         legacyFallbackHitCount++;
         long stageStart = System.nanoTime();
         if (data.isDebugEnabled()) {
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName() + " legacy onMove fallback active: " + reason
-                    + " source=" + frame.getSource().name() + " pathHits=" + legacyFallbackHitCount);
+            plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(),
+                    "legacy-fallback",
+                    "reason", reason,
+                    "source", frame.getSource().name(),
+                    "hits", String.valueOf(legacyFallbackHitCount)));
         }
 
         PlayerMoveEvent syntheticEvent = new PlayerMoveEvent(player, from, to);
@@ -476,8 +486,11 @@ final class MovementPipeline {
                 + movementAllowance * config.getDouble("pipeline.minimal-post.thresholds.groundspoof-budget-multiplier", 8.0D);
 
         if (data.isDebugEnabled()) {
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName() + " minimal post checks active: " + reasonCode
-                    + " source=" + frame.getSource().name() + " pathHits=" + minimalPostPredictionMissHitCount);
+            plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(),
+                    "minimal-post",
+                    "reason", reasonCode,
+                    "source", frame.getSource().name(),
+                    "hits", String.valueOf(minimalPostPredictionMissHitCount)));
         }
 
         for (SpeedCheck check : speedChecks) {

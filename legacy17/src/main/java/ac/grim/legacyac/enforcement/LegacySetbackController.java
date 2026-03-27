@@ -2,6 +2,7 @@ package ac.grim.legacyac.enforcement;
 
 import ac.grim.legacyac.LegacyAntiCheatPlugin;
 import ac.grim.legacyac.data.PlayerData;
+import ac.grim.legacyac.util.LogMessageFormatter;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,8 +37,11 @@ public final class LegacySetbackController {
             Location target = data.getLastSafeLocation().clone();
             lastCorrectionAt.put(player.getUniqueId(), Long.valueOf(now));
             if (data.isDebugEnabled()) {
-                plugin.getLogger().info("[GLAC-DEBUG] " + player.getName() + " correction HARD " + reason.name()
-                        + (detail == null ? "" : " " + detail));
+                plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(),
+                        "correction",
+                        "severity", "HARD",
+                        "reason", reason.name(),
+                        "detail", detail == null ? "" : detail));
             }
             player.teleport(target);
             return true;
@@ -50,8 +54,11 @@ public final class LegacySetbackController {
         Location target = data.getLastSafeLocation() != null ? data.getLastSafeLocation().clone() : player.getLocation();
         lastCorrectionAt.put(player.getUniqueId(), Long.valueOf(now));
         if (data.isDebugEnabled()) {
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName() + " correction SOFT " + reason.name()
-                    + (detail == null ? "" : " " + detail));
+            plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(),
+                    "correction",
+                    "severity", "SOFT",
+                    "reason", reason.name(),
+                    "detail", detail == null ? "" : detail));
         }
         player.teleport(target);
         return true;
