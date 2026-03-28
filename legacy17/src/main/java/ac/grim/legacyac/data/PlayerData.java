@@ -412,6 +412,11 @@ public final class PlayerData {
         return combat.getHitboxHistorySnapshot(maxAgeMillis, maxTimestampNanos, futureSlackNanos);
     }
 
+    public List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis, long referenceTimeMillis,
+            long maxTimestampNanos, long futureSlackNanos) {
+        return combat.getHitboxHistorySnapshot(maxAgeMillis, referenceTimeMillis, maxTimestampNanos, futureSlackNanos);
+    }
+
     // 闁冲厜鍋撻柍鍏夊亾 Network 闁冲厜鍋撻柍鍏夊亾
 
     public long getLastTransactionRttNanos() {
@@ -1334,19 +1339,36 @@ public final class PlayerData {
     public void resetSameTickPlaceCount() { sameTickPlaceCount = 0; }
 
     public void recordClaimedMovement(double x, double y, double z, float yaw, float pitch, boolean onGround) {
-        recordClaimedMovement(x, y, z, yaw, pitch, onGround, System.nanoTime());
+        recordClaimedMovementPacket(x, y, z, yaw, pitch, onGround, true, true, System.nanoTime());
     }
 
     public void recordClaimedMovement(double x, double y, double z, float yaw, float pitch, boolean onGround,
             long timestampNanos) {
-        claimedX = x;
-        claimedY = y;
-        claimedZ = z;
-        claimedYaw = yaw;
-        claimedPitch = pitch;
+        recordClaimedMovementPacket(x, y, z, yaw, pitch, onGround, true, true, timestampNanos);
+    }
+
+    public void recordClaimedMovementPacket(double x, double y, double z, float yaw, float pitch, boolean onGround,
+            boolean hasPosition, boolean hasLook, long timestampNanos) {
+        boolean seedFromPacket = !claimedMovementInitialized;
+        boolean positionUpdated = hasPosition || seedFromPacket;
+        boolean lookUpdated = hasLook || seedFromPacket;
+
+        if (positionUpdated) {
+            claimedX = x;
+            claimedY = y;
+            claimedZ = z;
+        }
+        if (lookUpdated) {
+            claimedYaw = yaw;
+            claimedPitch = pitch;
+        }
         claimedOnGround = onGround;
         claimedMovementInitialized = true;
         claimedMoveWindow = getMoveWindow();
+
+        if (!positionUpdated) {
+            return;
+        }
 
         double width = 0.6D;
         double height = 1.8D;
@@ -1429,7 +1451,8 @@ public final class PlayerData {
 
     public void queueAttackSnapshot(int targetEntityId, long createdAtNanos) {
         combat.recordAttack(targetEntityId);
-        queuedAttacks.addLast(new QueuedAttackSnapshot(createdAtNanos, snapshotClaimedX(), snapshotClaimedY(),
+        queuedAttacks.addLast(new QueuedAttackSnapshot(createdAtNanos, System.currentTimeMillis(),
+                snapshotClaimedX(), snapshotClaimedY(),
                 snapshotClaimedZ(), snapshotClaimedYaw(), snapshotClaimedPitch(), snapshotClaimedOnGround(),
                 targetEntityId, snapshotClaimedMoveWindow()));
         while (queuedAttacks.size() > 8) {
@@ -1643,6 +1666,7 @@ public final class PlayerData {
 
     public static final class QueuedAttackSnapshot implements TimedPacketSnapshot {
         private final long createdAtNanos;
+        private final long createdAtMillis;
         private final double originX;
         private final double originY;
         private final double originZ;
@@ -1652,9 +1676,10 @@ public final class PlayerData {
         private final int targetEntityId;
         private final int enqueueMoveWindow;
 
-        QueuedAttackSnapshot(long createdAtNanos, double originX, double originY, double originZ,
+        QueuedAttackSnapshot(long createdAtNanos, long createdAtMillis, double originX, double originY, double originZ,
                 float yaw, float pitch, boolean onGround, int targetEntityId, int enqueueMoveWindow) {
             this.createdAtNanos = createdAtNanos;
+            this.createdAtMillis = createdAtMillis;
             this.originX = originX;
             this.originY = originY;
             this.originZ = originZ;
@@ -1666,6 +1691,7 @@ public final class PlayerData {
         }
 
         public long getCreatedAtNanos() { return createdAtNanos; }
+        public long getCreatedAtMillis() { return createdAtMillis; }
         public double getOriginX() { return originX; }
         public double getOriginY() { return originY; }
         public double getOriginZ() { return originZ; }

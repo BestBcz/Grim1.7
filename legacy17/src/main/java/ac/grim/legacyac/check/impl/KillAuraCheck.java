@@ -40,7 +40,7 @@ public final class KillAuraCheck extends Check {
         suspicious |= checkRepeatedRotationPattern(attacker, data);
         suspicious |= checkMultiTarget(attacker, data, target);
         suspicious |= checkLineOfSight(attacker, target, data, reachEval);
-        suspicious |= checkReachContext(attacker, data, reachEval);
+        suspicious |= checkReachContext(attacker, data, reachEval, suspicious);
 
         if (!suspicious) {
             coolDownScore(data);
@@ -175,15 +175,23 @@ public final class KillAuraCheck extends Check {
         return true;
     }
 
-    private boolean checkReachContext(Player attacker, PlayerData data, ReachCheck.AttackEvaluation reachEval) {
+    private boolean checkReachContext(Player attacker, PlayerData data, ReachCheck.AttackEvaluation reachEval,
+            boolean priorSuspicious) {
         if (reachEval == null || reachEval.isLegal()) {
             return false;
         }
         if (!reachEval.isEnforceableWindow() || reachEval.isTeleportMarkerHit()) {
             return false;
         }
+        boolean aimSignal = hasRecentAimAssistSignal(data);
+        if (!priorSuspicious && !aimSignal) {
+            return false;
+        }
+        if (reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS && !aimSignal) {
+            return false;
+        }
 
-        double add = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS ? 0.70D : 0.80D;
+        double add = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS ? 0.60D : 0.80D;
         double buffer = slideAndAddScore(data, add, 1.0D);
         String detail = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS
                 ? "PACKET_HITBOX dist=" + String.format(Locale.ROOT, "%.2f", reachEval.getDirectDistance())
@@ -194,6 +202,20 @@ public final class KillAuraCheck extends Check {
             flag(attacker, data, add, detail);
         }
         return true;
+    }
+
+    private boolean hasRecentAimAssistSignal(PlayerData data) {
+        double duplicateLookScore = data.getBuffer("AimDuplicateLook") + data.getViolation("AimDuplicateLook");
+        if (duplicateLookScore >= 1.25D) {
+            return true;
+        }
+
+        double moduloScore = data.getBuffer("AimModulo360") + data.getViolation("AimModulo360");
+        if (moduloScore >= 1.0D) {
+            return true;
+        }
+
+        return false;
     }
 
     private void recordKillAuraCombatEvidence(Player attacker, PlayerData data, double score, String detail) {

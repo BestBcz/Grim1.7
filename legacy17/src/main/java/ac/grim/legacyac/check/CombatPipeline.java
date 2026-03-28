@@ -65,8 +65,10 @@ final class CombatPipeline {
         }
 
         long attackCreatedAtNanos = snapshot == null ? 0L : snapshot.getCreatedAtNanos();
+        long attackCreatedAtMillis = snapshot == null ? 0L : snapshot.getCreatedAtMillis();
         List<HitboxFrame> attackFrames = attackCreatedAtNanos > 0L
-                ? targetData.getHitboxHistorySnapshot(400L, attackCreatedAtNanos, ATTACK_HISTORY_FUTURE_SLACK_NANOS)
+                ? targetData.getHitboxHistorySnapshot(400L, attackCreatedAtMillis, attackCreatedAtNanos,
+                        ATTACK_HISTORY_FUTURE_SLACK_NANOS)
                 : targetData.getHitboxHistorySnapshot(400L);
         if (!attackFrames.isEmpty()) {
             FrameContextSnapshot attackerFrameContext = attackerData.getCurrentFrameContext();
@@ -76,7 +78,7 @@ final class CombatPipeline {
             }
         }
 
-        final long backtrackWindow = resolveCombatBacktrackWindow(attackerData);
+        final long backtrackWindow = resolveCombatBacktrackWindow(attackerData, targetData);
         final ReachCheck.AttackEvaluation reachEval;
         if (reachChecks.isEmpty()) {
             reachEval = new ReachCheck.AttackEvaluation(true, 0.0D, 0L, false, true,
@@ -121,13 +123,18 @@ final class CombatPipeline {
         }
     }
 
-    private long resolveCombatBacktrackWindow(PlayerData attackerData) {
+    private long resolveCombatBacktrackWindow(PlayerData attackerData, PlayerData targetData) {
         long configuredMax = plugin.getConfig().getLong("combat.backtrack-window-ms", 400L);
-        double oneWayDelay = Math.max(0.0D, attackerData.getLastTransactionRttNanos() / 2000000.0D);
-        double jitterGrace = Math.min(80.0D, attackerData.getTransactionRttJitterNanos() / 1000000.0D);
-        long dynamicWindow = Math.round(oneWayDelay + jitterGrace + 40.0D);
-        if (dynamicWindow < 75L) {
-            dynamicWindow = 75L;
+        double attackerOneWayDelay = Math.max(0.0D, attackerData.getLastTransactionRttNanos() / 2000000.0D);
+        double targetOneWayDelay = targetData == null ? 0.0D
+                : Math.max(0.0D, targetData.getLastTransactionRttNanos() / 2000000.0D);
+        double attackerJitterGrace = Math.min(80.0D, attackerData.getTransactionRttJitterNanos() / 1000000.0D);
+        double targetJitterGrace = targetData == null ? 0.0D
+                : Math.min(80.0D, targetData.getTransactionRttJitterNanos() / 1000000.0D);
+        long dynamicWindow = Math.round(attackerOneWayDelay + targetOneWayDelay
+                + Math.max(attackerJitterGrace, targetJitterGrace) + 50.0D);
+        if (dynamicWindow < 90L) {
+            dynamicWindow = 90L;
         }
         return Math.min(configuredMax, dynamicWindow);
     }

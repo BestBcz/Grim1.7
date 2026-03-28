@@ -75,8 +75,11 @@ final class PacketIntakeCoordinator {
             Float pitch = event.getPitch();
             Boolean onGround = event.getOnGround();
             if (x != null && y != null && z != null && yaw != null && pitch != null && onGround != null) {
-                data.recordClaimedMovement(x.doubleValue(), y.doubleValue(), z.doubleValue(),
-                        yaw.floatValue(), pitch.floatValue(), onGround.booleanValue(), event.getCreatedAtNanos());
+                boolean hasPosition = event.getHasPosition() != null && event.getHasPosition().booleanValue();
+                boolean hasLook = isLookMovementPacket(event.getMovementPacketName());
+                data.recordClaimedMovementPacket(x.doubleValue(), y.doubleValue(), z.doubleValue(),
+                        yaw.floatValue(), pitch.floatValue(), onGround.booleanValue(),
+                        hasPosition, hasLook, event.getCreatedAtNanos());
             }
             Boolean hasPos = event.getHasPosition();
             if (pitch != null && yaw != null) {
@@ -242,5 +245,12 @@ final class PacketIntakeCoordinator {
                         event.getCreatedAtNanos());
             }
         }
+    }
+
+    private static boolean isLookMovementPacket(String packetName) {
+        if (packetName == null) {
+            return false;
+        }
+        return packetName.contains("Look");
     }
 }

@@ -463,3 +463,22 @@ checks:
     punish-vl: 18
     punish-commands:
       - "kick %player% Scaffold (%check% VL:%vl%)"
+
+  AirLiquidPlace:
+    enabled: true
+    max-vl: 8.0
+    setback: false
+    punish-vl: 16
+    punish-commands:
+      - "kick %player% AirLiquidPlace (%check% VL:%vl%)"
+
+  FarPlace:
+    enabled: true
+    max-vl: 8.0
+    setback: false
+    max-reach: 5.0
+    max-reach-creative: 6.0
+    buffer: 0.5
+    punish-vl: 20
+    punish-commands:
+      - "kick %player% FarPlace (%check% VL:%vl%)"

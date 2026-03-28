@@ -87,8 +87,10 @@ public final class ReachCheck extends Check {
         double bonus = getAdaptiveReachBonus(data, victimData) + (recentTeleportOrPearl ? strafeSyncMargin : 0.0D);
         double maxReach = baseReach + bonus;
         AttackEvaluation eval = evaluate(attacker, data, victimData, maxReach, 400L, strafeSyncMargin, null);
+        eval = softenGraceWindowFalsePositive(data, victimData, eval, maxReach, recentTeleportOrPearl, null);
         if (!eval.isLegal()) {
-            handleViolation(event, attacker, data, eval, maxReach, baseReach, bonus, recentTeleportOrPearl, "event");
+            handleViolation(event, attacker, data, victimData, eval, maxReach, baseReach, bonus,
+                    recentTeleportOrPearl, "event");
         } else {
             coolDownScore(data);
             double cb = Math.max(0.0D, data.getBuffer(CANCEL_BUFFER_KEY) - 0.25D);
@@ -123,10 +125,12 @@ public final class ReachCheck extends Check {
         double maxReach = baseReach + bonus;
         AttackEvaluation eval = evaluate(attacker, attackerData, targetData, maxReach, backtrackMillis,
                 strafeSyncMargin, snapshot);
+        eval = softenGraceWindowFalsePositive(attackerData, targetData, eval, maxReach, recentTeleportOrPearl, snapshot);
         recentPacketReach.put(attacker.getUniqueId(), new RecentPacketReach(target.getUniqueId(), System.currentTimeMillis()));
 
         if (!eval.isLegal()) {
-            handleViolation(null, attacker, attackerData, eval, maxReach, baseReach, bonus, recentTeleportOrPearl, "packet");
+            handleViolation(null, attacker, attackerData, targetData, eval, maxReach, baseReach, bonus,
+                    recentTeleportOrPearl, "packet");
         } else {
             coolDownScore(attackerData);
             double cb = Math.max(0.0D, attackerData.getBuffer(CANCEL_BUFFER_KEY) - 0.25D);
@@ -137,6 +141,7 @@ public final class ReachCheck extends Check {
     }
 
     private void handleViolation(EntityDamageByEntityEvent event, Player attacker, PlayerData attackerData,
+            PlayerData targetData,
             AttackEvaluation eval, double maxReach, double baseReach, double bonus,
             boolean recentTeleportOrPearl, String source) {
         if (eval.getEvidenceType() == ReachEvidenceType.HITBOX_MISS) {
@@ -152,6 +157,27 @@ public final class ReachCheck extends Check {
 
         String evidencePrefix = eval.getEvidenceType() == ReachEvidenceType.HITBOX_MISS ? "HITBOX_MISS" : "REACH";
         String evidenceTag = evidencePrefix + "_" + source.toUpperCase(Locale.ROOT);
+        boolean velocityUncertain = isVelocityCombatWindowUncertain(attackerData, targetData);
+
+        if (!eval.isEnforceableWindow() || recentTeleportOrPearl || eval.isTeleportMarkerHit()) {
+            String verbose = eval.getEvidenceType() == ReachEvidenceType.HITBOX_MISS
+                    ? "type=" + eval.getEvidenceType().name()
+                    : String.format(Locale.ROOT, "%.5f", eval.getDirectDistance()) + " blocks";
+            plugin.alerts().alert(attacker, getName(), attackerData.getViolation(getName()),
+                    source + "-teleport-grace-only " + verbose + " max=" + String.format(Locale.ROOT, "%.3f", maxReach),
+                    null, source);
+            return;
+        }
+        if (velocityUncertain) {
+            String verbose = eval.getEvidenceType() == ReachEvidenceType.HITBOX_MISS
+                    ? "type=" + eval.getEvidenceType().name()
+                    : String.format(Locale.ROOT, "%.5f", eval.getDirectDistance()) + " blocks";
+            plugin.alerts().alert(attacker, getName(), attackerData.getViolation(getName()),
+                    source + "-velocity-grace-only " + verbose + " max=" + String.format(Locale.ROOT, "%.3f", maxReach),
+                    null, source);
+            return;
+        }
+
         attackerData.setBuffer(CANCEL_BUFFER_KEY, 1.0D);
 
         String verbose = eval.getEvidenceType() == ReachEvidenceType.HITBOX_MISS
@@ -159,13 +185,6 @@ public final class ReachCheck extends Check {
                 : String.format(Locale.ROOT, "%.5f", eval.getDirectDistance()) + " blocks";
 
         recordEvidence(attackerData, eval.getDirectDistance() - maxReach, evidenceTag);
-
-        if (!eval.isEnforceableWindow() || recentTeleportOrPearl || eval.isTeleportMarkerHit()) {
-            plugin.alerts().alert(attacker, getName(), attackerData.getViolation(getName()),
-                    source + "-teleport-grace-only " + verbose + " max=" + String.format(Locale.ROOT, "%.3f", maxReach),
-                    null, source);
-            return;
-        }
 
         String reason = source + "-" + eval.getEvidenceType().name().toLowerCase(Locale.ROOT)
                 + " " + verbose + " max="
@@ -213,6 +232,103 @@ public final class ReachCheck extends Check {
         return Math.min(0.12D, bonus);
     }
 
+    private AttackEvaluation softenGraceWindowFalsePositive(PlayerData attackerData, PlayerData targetData,
+            AttackEvaluation eval, double maxReach, boolean recentTeleportOrPearl,
+            PlayerData.QueuedAttackSnapshot snapshot) {
+        if (eval == null || eval.isLegal()) {
+            return eval;
+        }
+
+        boolean velocityUncertain = isVelocityCombatWindowUncertain(attackerData, targetData);
+        boolean teleportUncertain = !eval.isEnforceableWindow() || recentTeleportOrPearl || eval.isTeleportMarkerHit();
+        if (!velocityUncertain && !teleportUncertain) {
+            return eval;
+        }
+
+        double graceMotionAllowance = resolveGraceMotionAllowance(attackerData, targetData, eval,
+                velocityUncertain, teleportUncertain, snapshot);
+        if (eval.getDirectDistance() > maxReach + graceMotionAllowance) {
+            return eval;
+        }
+
+        return new AttackEvaluation(true, eval.getDirectDistance(), eval.getBoxTimeOffsetMs(),
+                eval.isTeleportMarkerHit(), eval.isEnforceableWindow(), ReachEvidenceType.NONE);
+    }
+
+    private double resolveGraceMotionAllowance(PlayerData attackerData, PlayerData targetData,
+            AttackEvaluation eval, boolean velocityUncertain, boolean teleportUncertain,
+            PlayerData.QueuedAttackSnapshot snapshot) {
+        double allowance = 0.04D;
+        allowance += Math.min(0.05D, attackerData.getLastDeltaXZ() * 0.10D);
+
+        double targetMotionEnvelope = estimateTargetMotionEnvelope(targetData, snapshot);
+        allowance += Math.min(0.22D, targetMotionEnvelope * 0.85D);
+
+        if (velocityUncertain) {
+            double velocityMagnitude = Math.max(targetData.getExpectedVelocityXZ(), targetData.getLastVelocityXZ());
+            allowance += Math.min(0.24D, velocityMagnitude * 0.38D);
+        }
+        if (teleportUncertain) {
+            long offsetMs = Math.max(0L, eval.getBoxTimeOffsetMs());
+            allowance += Math.min(0.18D, offsetMs / 250.0D);
+        }
+        if (eval.getEvidenceType() == ReachEvidenceType.HITBOX_MISS) {
+            allowance += 0.05D;
+        }
+
+        return Math.min(0.48D, allowance);
+    }
+
+    private double estimateTargetMotionEnvelope(PlayerData targetData, PlayerData.QueuedAttackSnapshot snapshot) {
+        long referenceTimeMillis = snapshot != null ? snapshot.getCreatedAtMillis() : System.currentTimeMillis();
+        long referenceTimeNanos = snapshot != null ? snapshot.getCreatedAtNanos() : 0L;
+        List<HitboxFrame> history = referenceTimeNanos > 0L
+                ? targetData.getHitboxHistorySnapshot(225L, referenceTimeMillis, referenceTimeNanos,
+                        ATTACK_HISTORY_FUTURE_SLACK_NANOS)
+                : targetData.getHitboxHistorySnapshot(225L);
+        if (history.size() < 2) {
+            return 0.0D;
+        }
+
+        double maxHorizontal = 0.0D;
+        double maxVertical = 0.0D;
+        int considered = 0;
+        for (int i = 0; i + 1 < history.size() && considered < 4; i++) {
+            HitboxFrame newer = history.get(i);
+            HitboxFrame older = history.get(i + 1);
+            if (!shouldSweepFrames(newer, older)) {
+                continue;
+            }
+
+            double dx = frameCenterX(newer) - frameCenterX(older);
+            double dy = frameCenterY(newer) - frameCenterY(older);
+            double dz = frameCenterZ(newer) - frameCenterZ(older);
+            double horizontal = Math.sqrt((dx * dx) + (dz * dz));
+            if (horizontal > maxHorizontal) {
+                maxHorizontal = horizontal;
+            }
+            double vertical = Math.abs(dy);
+            if (vertical > maxVertical) {
+                maxVertical = vertical;
+            }
+            considered++;
+        }
+
+        return maxHorizontal + Math.min(0.08D, maxVertical * 0.35D);
+    }
+
+    private boolean isVelocityCombatWindowUncertain(PlayerData attackerData, PlayerData targetData) {
+        long now = System.currentTimeMillis();
+        long graceMillis = plugin.getConfig().getLong("combat.reach-velocity-grace-ms", 400L);
+        if (attackerData.hasPendingVelocityWindow() || targetData.hasPendingVelocityWindow()) {
+            return true;
+        }
+        if (now - attackerData.getLastVelocityAt() <= graceMillis) {
+            return true;
+        }
+        return now - targetData.getLastVelocityAt() <= graceMillis;
+    }
+
     private void recordReachCombatEvidence(Player attacker, PlayerData attackerData, PlayerData targetData,
             AttackEvaluation eval, double maxReach, String source) {
         Location eye = attacker.getEyeLocation();
@@ -250,11 +366,14 @@ public final class ReachCheck extends Check {
             eyeLoc = attacker.getEyeLocation();
             primaryDir = eyeLoc.getDirection();
         }
-        Vector origin = eyeLoc.toVector();
+        double originX = eyeLoc.getX();
+        double originY = snapshot != null ? snapshot.getOriginY() : attacker.getLocation().getY();
+        double originZ = eyeLoc.getZ();
         if (primaryDir.lengthSquared() < 1.0E-9D) {
             return new AttackEvaluation(false, 999.0D, -1L, false, false, ReachEvidenceType.REACH);
         }
         primaryDir = primaryDir.normalize();
+        double[] possibleEyeHeights = resolvePossibleEyeHeights(attacker);
 
         float lastYaw = attackerData.getPrevYaw();
         float lastPitch = attackerData.getPrevPitch();
@@ -276,48 +395,53 @@ public final class ReachCheck extends Check {
         boolean markerHit = false;
         boolean enforceableWindow = true;
         long now = System.currentTimeMillis();
+        long referenceTimeMillis = snapshot != null ? snapshot.getCreatedAtMillis() : now;
 
         List<HitboxFrame> frames = buildAttackFrames(targetData, backtrackMillis, snapshot);
         if (frames.isEmpty()) {
             return new AttackEvaluation(true, 0.0D, 0L, false, false, ReachEvidenceType.NONE);
         }
         for (HitboxFrame frame : frames) {
-            if (RayTraceUtil.isVecInside(origin, expandedFrame(frame, hitboxExpand))) {
-                return new AttackEvaluation(true, 0.0D, now - frame.getTimestampMillis(), frame.isTeleportMarker(),
-                        isMovementFrameTrusted(frame), ReachEvidenceType.NONE);
-            }
-
             HitboxFrame expanded = expandedFrame(frame, hitboxExpand);
-            double dist = RayTraceUtil.intersectionDistance(origin, primaryDir, rayLength, expanded);
-            if (dist < closestIntersection) {
-                closestIntersection = dist;
-                hitOffset = now - frame.getTimestampMillis();
-                markerHit = frame.isTeleportMarker();
-                enforceableWindow = isMovementFrameTrusted(frame);
-            }
+            for (double eyeHeight : possibleEyeHeights) {
+                Vector origin = new Vector(originX, originY + eyeHeight, originZ);
+                if (RayTraceUtil.isVecInside(origin, expanded)) {
+                    return new AttackEvaluation(true, 0.0D, temporalOffsetMillis(referenceTimeMillis, frame),
+                            frame.isTeleportMarker(),
+                            isMovementFrameTrusted(frame), ReachEvidenceType.NONE);
+                }
 
-            double altDist = RayTraceUtil.intersectionDistance(origin, altDir, rayLength, expanded);
-            if (altDist < closestIntersection) {
-                closestIntersection = altDist;
-                hitOffset = now - frame.getTimestampMillis();
-                markerHit = frame.isTeleportMarker();
-                enforceableWindow = isMovementFrameTrusted(frame);
-            }
+                double dist = RayTraceUtil.intersectionDistance(origin, primaryDir, rayLength, expanded);
+                if (dist < closestIntersection) {
+                    closestIntersection = dist;
+                    hitOffset = temporalOffsetMillis(referenceTimeMillis, frame);
+                    markerHit = frame.isTeleportMarker();
+                    enforceableWindow = isMovementFrameTrusted(frame);
+                }
 
-            double syncLeftDist = RayTraceUtil.intersectionDistance(origin, syncLeftDir, rayLength, expanded);
-            if (syncLeftDist < closestIntersection) {
-                closestIntersection = syncLeftDist;
-                hitOffset = now - frame.getTimestampMillis();
-                markerHit = frame.isTeleportMarker();
-                enforceableWindow = isMovementFrameTrusted(frame);
-            }
+                double altDist = RayTraceUtil.intersectionDistance(origin, altDir, rayLength, expanded);
+                if (altDist < closestIntersection) {
+                    closestIntersection = altDist;
+                    hitOffset = temporalOffsetMillis(referenceTimeMillis, frame);
+                    markerHit = frame.isTeleportMarker();
+                    enforceableWindow = isMovementFrameTrusted(frame);
+                }
 
-            double syncRightDist = RayTraceUtil.intersectionDistance(origin, syncRightDir, rayLength, expanded);
-            if (syncRightDist < closestIntersection) {
-                closestIntersection = syncRightDist;
-                hitOffset = now - frame.getTimestampMillis();
-                markerHit = frame.isTeleportMarker();
-                enforceableWindow = isMovementFrameTrusted(frame);
+                double syncLeftDist = RayTraceUtil.intersectionDistance(origin, syncLeftDir, rayLength, expanded);
+                if (syncLeftDist < closestIntersection) {
+                    closestIntersection = syncLeftDist;
+                    hitOffset = temporalOffsetMillis(referenceTimeMillis, frame);
+                    markerHit = frame.isTeleportMarker();
+                    enforceableWindow = isMovementFrameTrusted(frame);
+                }
+
+                double syncRightDist = RayTraceUtil.intersectionDistance(origin, syncRightDir, rayLength, expanded);
+                if (syncRightDist < closestIntersection) {
+                    closestIntersection = syncRightDist;
+                    hitOffset = temporalOffsetMillis(referenceTimeMillis, frame);
+                    markerHit = frame.isTeleportMarker();
+                    enforceableWindow = isMovementFrameTrusted(frame);
+                }
             }
         }
 
@@ -332,12 +456,15 @@ public final class ReachCheck extends Check {
         boolean closestBoxEnforceable = true;
         for (HitboxFrame frame : frames) {
             HitboxFrame expanded = expandedFrame(frame, hitboxExpand);
-            double dist = closestPointDistance(origin, expanded);
-            if (dist < minReachToBox) {
-                minReachToBox = dist;
-                markerHit = frame.isTeleportMarker();
-                hitOffset = now - frame.getTimestampMillis();
-                closestBoxEnforceable = isMovementFrameTrusted(frame);
+            for (double eyeHeight : possibleEyeHeights) {
+                Vector origin = new Vector(originX, originY + eyeHeight, originZ);
+                double dist = closestPointDistance(origin, expanded);
+                if (dist < minReachToBox) {
+                    minReachToBox = dist;
+                    markerHit = frame.isTeleportMarker();
+                    hitOffset = temporalOffsetMillis(referenceTimeMillis, frame);
+                    closestBoxEnforceable = isMovementFrameTrusted(frame);
+                }
             }
         }
 
@@ -379,7 +506,8 @@ public final class ReachCheck extends Check {
     private List<HitboxFrame> buildAttackFrames(PlayerData targetData, long backtrackMillis,
             PlayerData.QueuedAttackSnapshot snapshot) {
         List<HitboxFrame> history = snapshot != null
-                ? targetData.getHitboxHistorySnapshot(backtrackMillis, snapshot.getCreatedAtNanos(),
+                ? targetData.getHitboxHistorySnapshot(backtrackMillis, snapshot.getCreatedAtMillis(),
+                        snapshot.getCreatedAtNanos(),
                         ATTACK_HISTORY_FUTURE_SLACK_NANOS)
                 : targetData.getHitboxHistorySnapshot(backtrackMillis);
         if (history.isEmpty()) {
@@ -401,6 +529,10 @@ public final class ReachCheck extends Check {
             expanded.add(sweptFrame(current, previous));
         }
         return expanded;
+    }
+
+    private static long temporalOffsetMillis(long referenceTimeMillis, HitboxFrame frame) {
+        return Math.abs(referenceTimeMillis - frame.getTimestampMillis());
     }
 
     private static boolean shouldSweepFrames(HitboxFrame newer, HitboxFrame older) {
@@ -434,6 +566,20 @@ public final class ReachCheck extends Check {
 
     private static boolean isMovementFrameTrusted(HitboxFrame frame) {
         return frame.isEnforceable() && frame.isTransactionAligned();
+    }
+
+    private static double[] resolvePossibleEyeHeights(Player attacker) {
+        double currentEyeHeight = attacker.getEyeHeight();
+        if (attacker.isSneaking()) {
+            if (Math.abs(currentEyeHeight - 1.54D) < 1.0E-3D) {
+                return new double[] { currentEyeHeight, 1.62D };
+            }
+            return new double[] { currentEyeHeight, 1.54D, 1.62D };
+        }
+        if (Math.abs(currentEyeHeight - 1.62D) < 1.0E-3D) {
+            return new double[] { currentEyeHeight };
+        }
+        return new double[] { currentEyeHeight, 1.62D };
     }
 
     private static double frameCenterX(HitboxFrame frame) {

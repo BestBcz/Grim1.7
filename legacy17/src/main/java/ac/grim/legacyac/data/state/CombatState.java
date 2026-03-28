@@ -72,12 +72,17 @@ public final class CombatState {
     }
 
     public synchronized List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis) {
-        return getHitboxHistorySnapshot(maxAgeMillis, 0L, 0L);
+        return getHitboxHistorySnapshot(maxAgeMillis, System.currentTimeMillis(), 0L, 0L);
     }
 
     public synchronized List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis, long maxTimestampNanos,
             long futureSlackNanos) {
-        long now = System.currentTimeMillis();
+        return getHitboxHistorySnapshot(maxAgeMillis, System.currentTimeMillis(), maxTimestampNanos, futureSlackNanos);
+    }
+
+    public synchronized List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis, long referenceTimeMillis,
+            long maxTimestampNanos, long futureSlackNanos) {
+        long now = referenceTimeMillis > 0L ? referenceTimeMillis : System.currentTimeMillis();
         long allowedMaxNanos = maxTimestampNanos > 0L ? maxTimestampNanos + Math.max(0L, futureSlackNanos) : 0L;
         List<HitboxFrame> copy = new ArrayList<HitboxFrame>();
         for (HitboxFrame frame : hitboxHistory) {

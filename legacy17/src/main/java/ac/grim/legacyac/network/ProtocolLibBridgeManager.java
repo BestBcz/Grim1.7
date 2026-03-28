@@ -108,9 +108,9 @@ public final class ProtocolLibBridgeManager {
                 boolean hasPosition = type == PacketType.Play.Client.POSITION || type == PacketType.Play.Client.POSITION_LOOK;
                 boolean hasLook = type == PacketType.Play.Client.LOOK || type == PacketType.Play.Client.POSITION_LOOK;
 
-                double x = player.getLocation().getX();
-                double y = player.getLocation().getY();
-                double z = player.getLocation().getZ();
+                double x = data.hasClaimedMovement() ? data.getClaimedX() : player.getLocation().getX();
+                double y = data.hasClaimedMovement() ? data.getClaimedY() : player.getLocation().getY();
+                double z = data.hasClaimedMovement() ? data.getClaimedZ() : player.getLocation().getZ();
                 if (hasPosition) {
                     Double packetX = packetReader.readDoubleValue(handle, 0, "x", "a");
                     Double packetY = packetReader.readDoubleValue(handle, 1, "y", "b");
@@ -125,8 +125,8 @@ public final class ProtocolLibBridgeManager {
                     z = packetZ.doubleValue();
                 }
 
-                float yaw = player.getLocation().getYaw();
-                float pitch = player.getLocation().getPitch();
+                float yaw = data.hasClaimedMovement() ? data.getClaimedYaw() : player.getLocation().getYaw();
+                float pitch = data.hasClaimedMovement() ? data.getClaimedPitch() : player.getLocation().getPitch();
                 if (hasLook) {
                     Float packetYaw = packetReader.readFloatValue(handle, 0, "yaw", "d");
                     Float packetPitch = packetReader.readFloatValue(handle, 1, "pitch", "e");
