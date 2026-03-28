@@ -2,6 +2,7 @@ package ac.grim.legacyac.combat;
 
 public final class HitboxFrame {
     private final long timestampMillis;
+    private final long timestampNanos;
     private final boolean teleportMarker;
     private final boolean transactionAligned;
     private final boolean enforceable;
@@ -14,7 +15,15 @@ public final class HitboxFrame {
 
     public HitboxFrame(long timestampMillis, boolean teleportMarker, boolean transactionAligned, boolean enforceable,
             double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
+        this(timestampMillis, 0L, teleportMarker, transactionAligned, enforceable,
+                minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    public HitboxFrame(long timestampMillis, long timestampNanos, boolean teleportMarker, boolean transactionAligned,
+            boolean enforceable,
+            double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
         this.timestampMillis = timestampMillis;
+        this.timestampNanos = timestampNanos;
         this.teleportMarker = teleportMarker;
         this.transactionAligned = transactionAligned;
         this.enforceable = enforceable;
@@ -28,6 +37,10 @@ public final class HitboxFrame {
 
     public long getTimestampMillis() {
         return timestampMillis;
+    }
+
+    public long getTimestampNanos() {
+        return timestampNanos;
     }
 
     public boolean isTeleportMarker() {

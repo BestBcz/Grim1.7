@@ -1,5 +1,6 @@
 package ac.grim.legacyac.world;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -14,6 +15,9 @@ public final class ChunkCache {
 
     public void snapshot(World world, int chunkX, int chunkZ) {
         if (world == null) {
+            return;
+        }
+        if (!Bukkit.isPrimaryThread()) {
             return;
         }
         if (!world.isChunkLoaded(chunkX, chunkZ)) {

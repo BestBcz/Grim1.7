@@ -12,6 +12,7 @@ import java.util.List;
 public final class CompensationState {
     private static final long TELEPORT_SYNC_TIMEOUT_MS = 1500L;
     private static final long PENDING_CHANGE_TIMEOUT_MS = 2000L;
+    private final Object lock = new Object();
 
     // Teleport sync
     private boolean teleportSyncPending;
@@ -30,13 +31,13 @@ public final class CompensationState {
     private double expectedVelocityXZ;
     private double expectedVelocityY;
     private double expectedVelX;
+    private double expectedVelY;
     private double expectedVelZ;
     private double observedVelocityXZ;
     private double observedVelocityY;
 
     // Pending world changes
     private final LinkedList<PendingWorldChange> pendingWorldChanges = new LinkedList<PendingWorldChange>();
-    private final MovementStateSnapshot movementStateSnapshot = new MovementStateSnapshot();
 
     // Slot switch grace
     private long lastSlotSwitchAt;
@@ -47,15 +48,17 @@ public final class CompensationState {
     }
 
     public void beginTeleportSync(double x, double y, double z, short anchorTransactionId) {
-        teleportSyncPending = true;
-        teleportPositionConfirmed = false;
-        pendingTeleportX = x;
-        pendingTeleportY = y;
-        pendingTeleportZ = z;
-        movementUnconfirmed = true;
-        lastTeleportAt = System.currentTimeMillis();
-        lastTeleportOrPearlAt = lastTeleportAt;
-        enqueuePendingWorldChange(PendingWorldChangeType.TELEPORT, "server-position-sync", anchorTransactionId);
+        synchronized (lock) {
+            teleportSyncPending = true;
+            teleportPositionConfirmed = false;
+            pendingTeleportX = x;
+            pendingTeleportY = y;
+            pendingTeleportZ = z;
+            movementUnconfirmed = true;
+            lastTeleportAt = System.currentTimeMillis();
+            lastTeleportOrPearlAt = lastTeleportAt;
+            enqueuePendingWorldChangeLocked(PendingWorldChangeType.TELEPORT, "server-position-sync", anchorTransactionId);
+        }
     }
 
     public void tryConfirmTeleportSync(double x, double y, double z, boolean hasRecentTxAck) {
@@ -63,81 +66,101 @@ public final class CompensationState {
     }
 
     public void tryConfirmTeleportSync(double x, double y, double z) {
-        if (!teleportSyncPending) {
-            return;
+        synchronized (lock) {
+            if (!teleportSyncPending) {
+                return;
+            }
+            double dx = Math.abs(x - pendingTeleportX);
+            double dy = Math.abs(y - pendingTeleportY);
+            double dz = Math.abs(z - pendingTeleportZ);
+            if (dx > 0.03125D || dy > 0.03125D || dz > 0.03125D) {
+                return;
+            }
+            teleportPositionConfirmed = true;
+            completeTeleportSyncIfReadyLocked();
         }
-        double dx = Math.abs(x - pendingTeleportX);
-        double dy = Math.abs(y - pendingTeleportY);
-        double dz = Math.abs(z - pendingTeleportZ);
-        if (dx > 0.03125D || dy > 0.03125D || dz > 0.03125D) {
-            return;
-        }
-        teleportPositionConfirmed = true;
-        completeTeleportSyncIfReady();
     }
 
     public boolean isTeleportSyncPending() {
-        expirePendingWorldChanges();
-        if (teleportSyncPending) {
-            long elapsed = System.currentTimeMillis() - lastTeleportAt;
-            if (elapsed > TELEPORT_SYNC_TIMEOUT_MS) {
-                teleportSyncPending = false;
-                teleportPositionConfirmed = false;
-                movementUnconfirmed = false;
+        synchronized (lock) {
+            expirePendingWorldChangesLocked();
+            if (teleportSyncPending) {
+                long elapsed = System.currentTimeMillis() - lastTeleportAt;
+                if (elapsed > TELEPORT_SYNC_TIMEOUT_MS) {
+                    teleportSyncPending = false;
+                    teleportPositionConfirmed = false;
+                    movementUnconfirmed = false;
+                }
             }
+            return teleportSyncPending;
         }
-        return teleportSyncPending;
     }
 
     public void setLastTeleportAt(long millis) {
-        this.lastTeleportAt = millis;
-        this.lastTeleportOrPearlAt = millis;
+        synchronized (lock) {
+            this.lastTeleportAt = millis;
+            this.lastTeleportOrPearlAt = millis;
+        }
     }
 
     public void setLastTeleportOrPearlAt(long millis) {
-        this.lastTeleportOrPearlAt = millis;
+        synchronized (lock) {
+            this.lastTeleportOrPearlAt = millis;
+        }
     }
 
     public void armVelocityWindow(double vx, double vz, double vy, int ticks) {
-        expectedVelX = vx;
-        expectedVelZ = vz;
-        expectedVelocityXZ = Math.sqrt(vx * vx + vz * vz);
-        expectedVelocityY = Math.abs(vy);
-        observedVelocityXZ = 0.0D;
-        observedVelocityY = 0.0D;
-        velocityTicksRemaining = ticks;
+        synchronized (lock) {
+            expectedVelX = vx;
+            expectedVelY = vy;
+            expectedVelZ = vz;
+            expectedVelocityXZ = Math.sqrt(vx * vx + vz * vz);
+            expectedVelocityY = Math.abs(vy);
+            observedVelocityXZ = 0.0D;
+            observedVelocityY = 0.0D;
+            velocityTicksRemaining = ticks;
+        }
     }
 
     public void tickVelocityWindow(double deltaXZ, double deltaY) {
-        if (velocityTicksRemaining <= 0) {
-            return;
+        synchronized (lock) {
+            if (velocityTicksRemaining <= 0) {
+                return;
+            }
+            if (deltaXZ > observedVelocityXZ) {
+                observedVelocityXZ = deltaXZ;
+            }
+            double absY = Math.abs(deltaY);
+            if (absY > observedVelocityY) {
+                observedVelocityY = absY;
+            }
+            velocityTicksRemaining--;
         }
-        if (deltaXZ > observedVelocityXZ) {
-            observedVelocityXZ = deltaXZ;
-        }
-        double absY = Math.abs(deltaY);
-        if (absY > observedVelocityY) {
-            observedVelocityY = absY;
-        }
-        velocityTicksRemaining--;
     }
 
     public void clearVelocityWindow() {
-        velocityTicksRemaining = 0;
-        expectedVelocityXZ = 0.0D;
-        expectedVelocityY = 0.0D;
-        expectedVelX = 0.0D;
-        expectedVelZ = 0.0D;
-        observedVelocityXZ = 0.0D;
-        observedVelocityY = 0.0D;
+        synchronized (lock) {
+            velocityTicksRemaining = 0;
+            expectedVelocityXZ = 0.0D;
+            expectedVelocityY = 0.0D;
+            expectedVelX = 0.0D;
+            expectedVelY = 0.0D;
+            expectedVelZ = 0.0D;
+            observedVelocityXZ = 0.0D;
+            observedVelocityY = 0.0D;
+        }
     }
 
     public void setLastVelocityAt(long millis) {
-        this.lastVelocityAt = millis;
+        synchronized (lock) {
+            this.lastVelocityAt = millis;
+        }
     }
 
     public void setLastVelocityXZ(double val) {
-        this.lastVelocityXZ = val;
+        synchronized (lock) {
+            this.lastVelocityXZ = val;
+        }
     }
 
     public void recordPendingVelocityChange(long oneWayDelayMs) {
@@ -145,7 +168,9 @@ public final class CompensationState {
     }
 
     public void recordPendingVelocityChange(short anchorTransactionId) {
-        enqueuePendingWorldChange(PendingWorldChangeType.VELOCITY, "entity-velocity", anchorTransactionId);
+        synchronized (lock) {
+            enqueuePendingWorldChangeLocked(PendingWorldChangeType.VELOCITY, "entity-velocity", anchorTransactionId);
+        }
     }
 
     public void recordPendingBlockChange(String reason, long oneWayDelayMs) {
@@ -153,79 +178,97 @@ public final class CompensationState {
     }
 
     public void recordPendingBlockChange(String reason, short anchorTransactionId) {
-        enqueuePendingWorldChange(PendingWorldChangeType.BLOCK_CHANGE, reason, anchorTransactionId);
+        synchronized (lock) {
+            enqueuePendingWorldChangeLocked(PendingWorldChangeType.BLOCK_CHANGE, reason, anchorTransactionId);
+        }
     }
 
     public void acknowledgeTransaction(short actionId) {
-        Iterator<PendingWorldChange> iterator = pendingWorldChanges.iterator();
-        while (iterator.hasNext()) {
-            PendingWorldChange change = iterator.next();
-            if (change.getAnchorTransactionId() != actionId) {
-                continue;
-            }
-            if (change.getType() == PendingWorldChangeType.TELEPORT) {
+        synchronized (lock) {
+            Iterator<PendingWorldChange> iterator = pendingWorldChanges.iterator();
+            while (iterator.hasNext()) {
+                PendingWorldChange change = iterator.next();
+                if (change.getAnchorTransactionId() != actionId) {
+                    continue;
+                }
+                if (change.getType() == PendingWorldChangeType.TELEPORT) {
+                    iterator.remove();
+                    completeTeleportSyncIfReadyLocked();
+                    continue;
+                }
                 iterator.remove();
-                completeTeleportSyncIfReady();
-                continue;
             }
-            iterator.remove();
         }
-        movementStateSnapshot.updateFrom(this);
     }
 
     public void markSlotSwitch() {
-        lastSlotSwitchAt = System.currentTimeMillis();
+        synchronized (lock) {
+            lastSlotSwitchAt = System.currentTimeMillis();
+        }
     }
 
     public void startSlotSwitchGrace(int ticks) {
-        if (ticks > slotSwitchGraceTicksRemaining) {
-            slotSwitchGraceTicksRemaining = ticks;
+        synchronized (lock) {
+            if (ticks > slotSwitchGraceTicksRemaining) {
+                slotSwitchGraceTicksRemaining = ticks;
+            }
         }
     }
 
     public void tickSlotSwitchGrace() {
-        if (slotSwitchGraceTicksRemaining > 0) {
-            slotSwitchGraceTicksRemaining--;
+        synchronized (lock) {
+            if (slotSwitchGraceTicksRemaining > 0) {
+                slotSwitchGraceTicksRemaining--;
+            }
         }
     }
 
     public boolean isInSlotSwitchGrace() {
-        return slotSwitchGraceTicksRemaining > 0;
+        synchronized (lock) {
+            return slotSwitchGraceTicksRemaining > 0;
+        }
     }
 
     public long getLastSlotSwitchAt() {
-        return lastSlotSwitchAt;
+        synchronized (lock) {
+            return lastSlotSwitchAt;
+        }
     }
 
-    private void enqueuePendingWorldChange(PendingWorldChangeType type, String reason, short anchorTransactionId) {
+    private void enqueuePendingWorldChangeLocked(PendingWorldChangeType type, String reason, short anchorTransactionId) {
         long now = System.currentTimeMillis();
         pendingWorldChanges.add(new PendingWorldChange(type, now, now + PENDING_CHANGE_TIMEOUT_MS, anchorTransactionId, reason));
         while (pendingWorldChanges.size() > 32) {
             pendingWorldChanges.removeFirst();
         }
-        movementStateSnapshot.updateFrom(this);
     }
 
     public void applyPendingWorldChanges() {
-        expirePendingWorldChanges();
+        synchronized (lock) {
+            expirePendingWorldChangesLocked();
+        }
     }
 
     public int getPendingWorldChangesCount() {
-        expirePendingWorldChanges();
-        return pendingWorldChanges.size();
+        synchronized (lock) {
+            expirePendingWorldChangesLocked();
+            return pendingWorldChanges.size();
+        }
     }
 
     public List<String> getPendingWorldChangeDebugSnapshot() {
-        expirePendingWorldChanges();
-        List<String> snapshot = new ArrayList<String>();
-        for (PendingWorldChange change : pendingWorldChanges) {
-            snapshot.add(change.getType().name() + "#"
-                    + change.getAnchorTransactionId() + ":" + change.getReason());
+        synchronized (lock) {
+            expirePendingWorldChangesLocked();
+            List<String> snapshot = new ArrayList<String>();
+            for (PendingWorldChange change : pendingWorldChanges) {
+                snapshot.add(change.getType().name() + "#"
+                        + change.getAnchorTransactionId() + ":" + change.getReason());
+            }
+            return snapshot;
         }
-        return snapshot;
     }
 
-    int countPendingChanges(PendingWorldChangeType type) {
+    private int countPendingChangesLocked(PendingWorldChangeType type) {
         int count = 0;
         for (PendingWorldChange change : pendingWorldChanges) {
             if (change.getType() == type) {
@@ -236,67 +279,103 @@ public final class CompensationState {
     }
 
     public MovementStateSnapshot getMovementStateSnapshot() {
-        movementStateSnapshot.updateFrom(this);
-        return movementStateSnapshot;
+        synchronized (lock) {
+            expirePendingWorldChangesLocked();
+            return createMovementStateSnapshotLocked();
+        }
     }
 
     public long getLastTeleportAt() {
-        return lastTeleportAt;
+        synchronized (lock) {
+            return lastTeleportAt;
+        }
     }
 
     public long getLastTeleportOrPearlAt() {
-        return lastTeleportOrPearlAt;
+        synchronized (lock) {
+            return lastTeleportOrPearlAt;
+        }
     }
 
     public long getLastVelocityAt() {
-        return lastVelocityAt;
+        synchronized (lock) {
+            return lastVelocityAt;
+        }
     }
 
     public double getLastVelocityXZ() {
-        return lastVelocityXZ;
+        synchronized (lock) {
+            return lastVelocityXZ;
+        }
     }
 
     public boolean hasPendingVelocityWindow() {
-        return velocityTicksRemaining > 0;
+        synchronized (lock) {
+            return velocityTicksRemaining > 0;
+        }
     }
 
     public boolean hasCompletedVelocityWindow() {
-        return velocityTicksRemaining <= 0 && (expectedVelocityXZ > 0.0D || expectedVelocityY > 0.0D);
+        synchronized (lock) {
+            return velocityTicksRemaining <= 0 && (expectedVelocityXZ > 0.0D || expectedVelocityY > 0.0D);
+        }
     }
 
     public double getExpectedVelocityXZ() {
-        return expectedVelocityXZ;
+        synchronized (lock) {
+            return expectedVelocityXZ;
+        }
     }
 
     public double getExpectedVelocityY() {
-        return expectedVelocityY;
+        synchronized (lock) {
+            return expectedVelocityY;
+        }
     }
 
     public double getExpectedVelX() {
-        return expectedVelX;
+        synchronized (lock) {
+            return expectedVelX;
+        }
+    }
+
+    public double getExpectedVelY() {
+        synchronized (lock) {
+            return expectedVelY;
+        }
     }
 
     public double getExpectedVelZ() {
-        return expectedVelZ;
+        synchronized (lock) {
+            return expectedVelZ;
+        }
     }
 
     public double getObservedVelocityXZ() {
-        return observedVelocityXZ;
+        synchronized (lock) {
+            return observedVelocityXZ;
+        }
     }
 
     public double getObservedVelocityY() {
-        return observedVelocityY;
+        synchronized (lock) {
+            return observedVelocityY;
+        }
     }
 
     public boolean isMovementUnconfirmed() {
-        return movementUnconfirmed;
+        synchronized (lock) {
+            return movementUnconfirmed;
+        }
     }
 
     public void setMovementUnconfirmed(boolean val) {
-        this.movementUnconfirmed = val;
+        synchronized (lock) {
+            this.movementUnconfirmed = val;
+        }
     }
 
-    private void expirePendingWorldChanges() {
+    private void expirePendingWorldChangesLocked() {
         long now = System.currentTimeMillis();
         Iterator<PendingWorldChange> iterator = pendingWorldChanges.iterator();
         while (iterator.hasNext()) {
@@ -313,14 +392,14 @@ public final class CompensationState {
         }
     }
 
-    private void completeTeleportSyncIfReady() {
+    private void completeTeleportSyncIfReadyLocked() {
         if (!teleportSyncPending) {
             return;
         }
         if (!teleportPositionConfirmed) {
             return;
         }
-        if (countPendingChanges(PendingWorldChangeType.TELEPORT) > 0) {
+        if (countPendingChangesLocked(PendingWorldChangeType.TELEPORT) > 0) {
             return;
         }
         teleportSyncPending = false;
@@ -328,21 +407,44 @@ public final class CompensationState {
         movementUnconfirmed = false;
     }
 
-    public static final class MovementStateSnapshot {
-        private boolean teleportAligned;
-        private boolean velocityAligned;
-        private boolean blockAligned;
-        private int pendingChanges;
+    private MovementStateSnapshot createMovementStateSnapshotLocked() {
+        int pendingTeleport = countPendingChangesLocked(PendingWorldChangeType.TELEPORT);
+        int pendingVelocity = countPendingChangesLocked(PendingWorldChangeType.VELOCITY);
+        int pendingBlock = countPendingChangesLocked(PendingWorldChangeType.BLOCK_CHANGE);
+        boolean teleportAligned = pendingTeleport == 0 && !teleportSyncPending;
+        boolean velocityAligned = pendingVelocity == 0;
+        boolean blockAligned = pendingBlock == 0;
+        int pendingChanges = pendingTeleport + pendingVelocity + pendingBlock;
+        AlignmentBlocker primaryBlocker;
+        if (!teleportAligned) {
+            primaryBlocker = AlignmentBlocker.TELEPORT;
+        } else if (!blockAligned) {
+            primaryBlocker = AlignmentBlocker.BLOCK;
+        } else if (!velocityAligned) {
+            primaryBlocker = AlignmentBlocker.VELOCITY;
+        } else {
+            primaryBlocker = AlignmentBlocker.NONE;
+        }
+        return new MovementStateSnapshot(teleportAligned, velocityAligned, blockAligned, pendingChanges,
+                primaryBlocker, primaryBlocker == AlignmentBlocker.NONE);
+    }
 
-        void updateFrom(CompensationState state) {
-            state.expirePendingWorldChanges();
-            int pendingTeleport = state.countPendingChanges(PendingWorldChangeType.TELEPORT);
-            int pendingVelocity = state.countPendingChanges(PendingWorldChangeType.VELOCITY);
-            int pendingBlock = state.countPendingChanges(PendingWorldChangeType.BLOCK_CHANGE);
-            this.teleportAligned = pendingTeleport == 0 && !state.teleportSyncPending;
-            this.velocityAligned = pendingVelocity == 0;
-            this.blockAligned = pendingBlock == 0;
-            this.pendingChanges = pendingTeleport + pendingVelocity + pendingBlock;
+    public static final class MovementStateSnapshot {
+        private final boolean teleportAligned;
+        private final boolean velocityAligned;
+        private final boolean blockAligned;
+        private final int pendingChanges;
+        private final AlignmentBlocker primaryBlocker;
+        private final boolean enforceable;
+
+        MovementStateSnapshot(boolean teleportAligned, boolean velocityAligned, boolean blockAligned,
+                int pendingChanges, AlignmentBlocker primaryBlocker, boolean enforceable) {
+            this.teleportAligned = teleportAligned;
+            this.velocityAligned = velocityAligned;
+            this.blockAligned = blockAligned;
+            this.pendingChanges = pendingChanges;
+            this.primaryBlocker = primaryBlocker;
+            this.enforceable = enforceable;
         }
 
         public boolean isTeleportAligned() {
@@ -364,6 +466,22 @@ public final class CompensationState {
         public int getPendingChanges() {
             return pendingChanges;
         }
+
+        public AlignmentBlocker getPrimaryBlocker() {
+            return primaryBlocker;
+        }
+
+        public boolean isEnforceable() {
+            return enforceable;
+        }
+    }
+
+    public enum AlignmentBlocker {
+        NONE,
+        TELEPORT,
+        BLOCK,
+        VELOCITY,
+        DEGRADED_PIPELINE
     }
 
     enum PendingWorldChangeType {

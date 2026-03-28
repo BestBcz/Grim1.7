@@ -5,9 +5,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
-import java.util.Locale;
 
 public final class AlertManager {
     private final LegacyAntiCheatPlugin plugin;
@@ -32,11 +30,17 @@ public final class AlertManager {
     }
 
     public void alert(Player suspect, String check, double vl, String detail) {
-        String message = ChatColor.RED + "[GLAC] " + ChatColor.GRAY + suspect.getName() + " failed " + check
-            + ChatColor.DARK_GRAY + " (VL=" + String.format(Locale.ROOT, "%.2f", vl) + ", " + detail + ")";
+        alert(suspect, check, vl, detail, null, null);
+    }
+
+    public void alert(Player suspect, String check, double vl, String detail, String budgetTag, String source) {
+        String playerMessage = LogMessageFormatter.alertLine(plugin.getConfig(), false,
+                suspect.getName(), check, vl, detail, budgetTag, source);
+        String consoleMessage = LogMessageFormatter.alertLine(plugin.getConfig(), true,
+                suspect.getName(), check, vl, detail, budgetTag, source);
 
         if (plugin.getConfig().getBoolean("alerts.console", true)) {
-            Bukkit.getConsoleSender().sendMessage(ChatColor.stripColor(message));
+            Bukkit.getConsoleSender().sendMessage(consoleMessage);
         }
 
         boolean requireSubscription = plugin.getConfig().getBoolean("alerts.require-subscription", false);
@@ -47,7 +51,7 @@ public final class AlertManager {
             if (requireSubscription && !subscribers.contains(online.getUniqueId())) {
                 continue;
             }
-            online.sendMessage(message);
+            online.sendMessage(playerMessage);
         }
     }
 }

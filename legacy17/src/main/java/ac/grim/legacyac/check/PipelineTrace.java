@@ -57,27 +57,59 @@ public final class PipelineTrace {
     public String toSummary() {
         StringBuilder sb = new StringBuilder();
         sb.append("[PIPELINE] ").append(playerName);
-        sb.append(" total=").append(String.format(Locale.ROOT, "%.2fms", totalDurationNanos / 1000000.0D));
-        int ran = 0, skipped = 0;
+        sb.append(" | total=").append(String.format(Locale.ROOT, "%.2fms", totalDurationNanos / 1000000.0D));
+        int ran = 0;
+        int skipped = 0;
+        int pre = 0;
+        int prediction = 0;
+        int post = 0;
+        int combat = 0;
+        int fallback = 0;
         for (Entry e : entries) {
-            if (e.status == Status.RAN)
+            if (e.status == Status.RAN) {
                 ran++;
-            else
+            } else {
                 skipped++;
+            }
+            switch (e.stage) {
+                case PRE:
+                    pre++;
+                    break;
+                case PREDICTION:
+                    prediction++;
+                    break;
+                case POST:
+                    post++;
+                    break;
+                case COMBAT:
+                    combat++;
+                    break;
+                case FALLBACK:
+                    fallback++;
+                    break;
+                default:
+                    break;
+            }
         }
-        sb.append(" ran=").append(ran).append(" skipped=").append(skipped);
+        sb.append(" | ran=").append(ran).append(" skip=").append(skipped);
+        sb.append(" | stages=");
+        sb.append("pre:").append(pre)
+                .append(",pred:").append(prediction)
+                .append(",post:").append(post)
+                .append(",combat:").append(combat)
+                .append(",fallback:").append(fallback);
         if (skipped > 0) {
-            sb.append(" [skipped:");
+            sb.append(" | skipped=");
             boolean first = true;
             for (Entry e : entries) {
                 if (e.status != Status.RAN) {
-                    if (!first)
-                        sb.append(',');
+                    if (!first) {
+                        sb.append(", ");
+                    }
                     sb.append(e.checkName).append('(').append(e.reason).append(')');
                     first = false;
                 }
             }
-            sb.append(']');
         }
         return sb.toString();
     }

@@ -205,11 +205,16 @@ public final class PacketPipelineInjector {
         boolean hasPosition = packetName.equals("PacketPlayInPosition") || packetName.equals("PacketPlayInPositionLook");
         boolean hasLook = packetName.equals("PacketPlayInLook") || packetName.equals("PacketPlayInPositionLook");
 
-        Double x = hasPosition ? readDoubleField(packet, "x", "a") : Double.valueOf(base.x);
-        Double y = hasPosition ? readDoubleField(packet, "y", "b") : Double.valueOf(base.y);
-        Double z = hasPosition ? readDoubleField(packet, "z", "c") : Double.valueOf(base.z);
-        Float yaw = hasLook ? readFloatField(packet, "yaw", "d") : Float.valueOf(base.yaw);
-        Float pitch = hasLook ? readFloatField(packet, "pitch", "e") : Float.valueOf(base.pitch);
+        Double x = hasPosition ? readDoubleField(packet, "x", "a")
+                : Double.valueOf(data.hasClaimedMovement() ? data.getClaimedX() : base.x);
+        Double y = hasPosition ? readDoubleField(packet, "y", "b")
+                : Double.valueOf(data.hasClaimedMovement() ? data.getClaimedY() : base.y);
+        Double z = hasPosition ? readDoubleField(packet, "z", "c")
+                : Double.valueOf(data.hasClaimedMovement() ? data.getClaimedZ() : base.z);
+        Float yaw = hasLook ? readFloatField(packet, "yaw", "d")
+                : Float.valueOf(data.hasClaimedMovement() ? data.getClaimedYaw() : base.yaw);
+        Float pitch = hasLook ? readFloatField(packet, "pitch", "e")
+                : Float.valueOf(data.hasClaimedMovement() ? data.getClaimedPitch() : base.pitch);
         Boolean onGround = readBooleanField(packet, "onGround", "g", "f");
         if (x == null || y == null || z == null || yaw == null || pitch == null || onGround == null) {
             warnReflectionFailureOnce(packetName, "movement-frame");
@@ -217,7 +222,9 @@ public final class PacketPipelineInjector {
         }
 
         plugin.checks().onInternalPacketEvent(
-                InternalPacketEvent.clientMovementEx(player, packetName, nowNanos, hasPosition, yaw.floatValue(), pitch.floatValue()));
+                InternalPacketEvent.clientMovementEx(player, packetName, nowNanos,
+                        x.doubleValue(), y.doubleValue(), z.doubleValue(),
+                        onGround.booleanValue(), hasPosition, yaw.floatValue(), pitch.floatValue()));
         if (hasPosition) {
             data.tryConfirmTeleportSync(x.doubleValue(), y.doubleValue(), z.doubleValue());
         }

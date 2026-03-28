@@ -13,14 +13,10 @@ public final class CombatState {
     private long lastAttackAt;
     private int lastAttackTargetId;
 
-    // Click rate tracking
     private int clickWindow;
     private long clickWindowStart;
 
-    // Hitbox backtrack history
     private final LinkedList<HitboxFrame> hitboxHistory = new LinkedList<HitboxFrame>();
-
-    // ── Update methods ──────────────────────────────────────────────────
 
     public void recordAttack(int targetEntityId) {
         this.lastAttackAt = System.currentTimeMillis();
@@ -52,29 +48,54 @@ public final class CombatState {
         }
     }
 
-    public void recordHitbox(double x, double y, double z, double width, double height,
+    public synchronized void recordHitbox(double x, double y, double z, double width, double height,
             boolean teleportMarker, boolean transactionAligned, boolean enforceable) {
-        double halfWidth = width * 0.5D;
+        recordHitbox(x, y, z, width, height, teleportMarker, transactionAligned, enforceable, System.nanoTime());
+    }
+
+    public synchronized void recordHitbox(double x, double y, double z, double width, double height,
+            boolean teleportMarker, boolean transactionAligned, boolean enforceable, long timestampNanos) {
         long now = System.currentTimeMillis();
-        hitboxHistory.addFirst(new HitboxFrame(now, teleportMarker, transactionAligned, enforceable,
+        if (!hitboxHistory.isEmpty() && timestampNanos > 0L) {
+            HitboxFrame newest = hitboxHistory.getFirst();
+            if (newest.getTimestampNanos() == timestampNanos) {
+                now = newest.getTimestampMillis();
+                hitboxHistory.removeFirst();
+            }
+        }
+        double halfWidth = width * 0.5D;
+        hitboxHistory.addFirst(new HitboxFrame(now, timestampNanos, teleportMarker, transactionAligned, enforceable,
                 x - halfWidth, y, z - halfWidth, x + halfWidth, y + height, z + halfWidth));
         while (!hitboxHistory.isEmpty() && now - hitboxHistory.getLast().getTimestampMillis() > 400L) {
             hitboxHistory.removeLast();
         }
     }
 
-    public List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis) {
-        long now = System.currentTimeMillis();
+    public synchronized List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis) {
+        return getHitboxHistorySnapshot(maxAgeMillis, System.currentTimeMillis(), 0L, 0L);
+    }
+
+    public synchronized List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis, long maxTimestampNanos,
+            long futureSlackNanos) {
+        return getHitboxHistorySnapshot(maxAgeMillis, System.currentTimeMillis(), maxTimestampNanos, futureSlackNanos);
+    }
+
+    public synchronized List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis, long referenceTimeMillis,
+            long maxTimestampNanos, long futureSlackNanos) {
+        long now = referenceTimeMillis > 0L ? referenceTimeMillis : System.currentTimeMillis();
+        long allowedMaxNanos = maxTimestampNanos > 0L ? maxTimestampNanos + Math.max(0L, futureSlackNanos) : 0L;
         List<HitboxFrame> copy = new ArrayList<HitboxFrame>();
         for (HitboxFrame frame : hitboxHistory) {
-            if (now - frame.getTimestampMillis() <= maxAgeMillis) {
-                copy.add(frame);
+            if (now - frame.getTimestampMillis() > maxAgeMillis) {
+                continue;
             }
+            if (allowedMaxNanos > 0L && frame.getTimestampNanos() > 0L && frame.getTimestampNanos() > allowedMaxNanos) {
+                continue;
+            }
+            copy.add(frame);
         }
         return copy;
     }
-
-    // ── Read interface ──────────────────────────────────────────────────
 
     public long getLastAttackAt() {
         return lastAttackAt;

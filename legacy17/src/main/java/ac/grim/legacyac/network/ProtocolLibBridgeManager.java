@@ -108,9 +108,9 @@ public final class ProtocolLibBridgeManager {
                 boolean hasPosition = type == PacketType.Play.Client.POSITION || type == PacketType.Play.Client.POSITION_LOOK;
                 boolean hasLook = type == PacketType.Play.Client.LOOK || type == PacketType.Play.Client.POSITION_LOOK;
 
-                double x = player.getLocation().getX();
-                double y = player.getLocation().getY();
-                double z = player.getLocation().getZ();
+                double x = data.hasClaimedMovement() ? data.getClaimedX() : player.getLocation().getX();
+                double y = data.hasClaimedMovement() ? data.getClaimedY() : player.getLocation().getY();
+                double z = data.hasClaimedMovement() ? data.getClaimedZ() : player.getLocation().getZ();
                 if (hasPosition) {
                     Double packetX = packetReader.readDoubleValue(handle, 0, "x", "a");
                     Double packetY = packetReader.readDoubleValue(handle, 1, "y", "b");
@@ -125,8 +125,8 @@ public final class ProtocolLibBridgeManager {
                     z = packetZ.doubleValue();
                 }
 
-                float yaw = player.getLocation().getYaw();
-                float pitch = player.getLocation().getPitch();
+                float yaw = data.hasClaimedMovement() ? data.getClaimedYaw() : player.getLocation().getYaw();
+                float pitch = data.hasClaimedMovement() ? data.getClaimedPitch() : player.getLocation().getPitch();
                 if (hasLook) {
                     Float packetYaw = packetReader.readFloatValue(handle, 0, "yaw", "d");
                     Float packetPitch = packetReader.readFloatValue(handle, 1, "pitch", "e");
@@ -198,10 +198,11 @@ public final class ProtocolLibBridgeManager {
                     disableMovementCapture("server-position");
                     return;
                 }
-                short anchorTxId = reserveDeferredTransaction(event.getPlayer());
+                TxAnchorService.TeleportAnchor anchor = ((LegacyAntiCheatPlugin) plugin).txAnchors()
+                        .anchorTeleport(event.getPlayer());
                 ((LegacyAntiCheatPlugin) plugin).checks().onInternalPacketEvent(
                         InternalPacketEvent.serverPosition(event.getPlayer(), x.doubleValue(), y.doubleValue(),
-                                z.doubleValue(), anchorTxId, System.nanoTime()));
+                                z.doubleValue(), anchor.getTransactionId(), System.nanoTime()));
             }
         };
         protocolManager.addPacketListener(adapter);
@@ -389,36 +390,44 @@ public final class ProtocolLibBridgeManager {
                 PlayerData data = ((LegacyAntiCheatPlugin) plugin).getPlayerData(player);
                 PacketType type = event.getPacketType();
                 Object handle = event.getPacket().getHandle();
-                short anchorTxId = reserveDeferredTransaction(player);
-
                 if (type == PacketType.Play.Server.BLOCK_CHANGE) {
+                    TxAnchorService.WorldAnchor anchor = ((LegacyAntiCheatPlugin) plugin).txAnchors()
+                            .anchorWorldUpdate(player, TxAnchorService.WorldUpdateKind.BLOCK_CHANGE);
                     BlockChangeSnapshot snapshot = readBlockChange(handle);
                     if (snapshot != null) {
                         data.queueCompensatedBlockChange(player, snapshot.x, snapshot.y, snapshot.z,
-                                snapshot.material, snapshot.data, anchorTxId,
+                                snapshot.material, snapshot.data, anchor.getTransactionId(),
                                 "packet:block-change:" + snapshot.material.name());
                     } else {
                         disableWorldCapture("block-change");
                         data.queueCompensatedChunkRefresh(player, player.getLocation().getBlockX() >> 4,
-                                player.getLocation().getBlockZ() >> 4, anchorTxId, "packet:block-change-fallback");
+                                player.getLocation().getBlockZ() >> 4, anchor.getTransactionId(),
+                                "packet:block-change-fallback");
                     }
                     return;
                 }
 
                 if (type == PacketType.Play.Server.MULTI_BLOCK_CHANGE || type == PacketType.Play.Server.MAP_CHUNK) {
+                    TxAnchorService.WorldUpdateKind kind = type == PacketType.Play.Server.MULTI_BLOCK_CHANGE
+                            ? TxAnchorService.WorldUpdateKind.MULTI_BLOCK_CHANGE
+                            : TxAnchorService.WorldUpdateKind.MAP_CHUNK;
+                    TxAnchorService.WorldAnchor anchor = ((LegacyAntiCheatPlugin) plugin).txAnchors()
+                            .anchorWorldUpdate(player, kind);
                     int chunkX = readIntField(handle, 0, "a", "chunkX");
                     int chunkZ = readIntField(handle, 1, "b", "chunkZ");
-                    data.queueCompensatedChunkRefresh(player, chunkX, chunkZ, anchorTxId,
+                    data.queueCompensatedChunkRefresh(player, chunkX, chunkZ, anchor.getTransactionId(),
                             "packet:" + type.name().toLowerCase());
                     return;
                 }
 
                 if (type == PacketType.Play.Server.MAP_CHUNK_BULK) {
+                    TxAnchorService.WorldAnchor anchor = ((LegacyAntiCheatPlugin) plugin).txAnchors()
+                            .anchorWorldUpdate(player, TxAnchorService.WorldUpdateKind.MAP_CHUNK_BULK);
                     int[] xs = readIntArrayField(handle, 0, "c", "xChunks");
                     int[] zs = readIntArrayField(handle, 1, "d", "zChunks");
                     if (xs != null && zs != null) {
                         for (int index = 0; index < xs.length && index < zs.length; index++) {
-                            data.queueCompensatedChunkRefresh(player, xs[index], zs[index], anchorTxId,
+                            data.queueCompensatedChunkRefresh(player, xs[index], zs[index], anchor.getTransactionId(),
                                     "packet:map_chunk_bulk");
                         }
                     } else {
@@ -544,24 +553,6 @@ public final class ProtocolLibBridgeManager {
             }
         }
         throw new NoSuchFieldException(name);
-    }
-
-    private short reserveDeferredTransaction(final Player player) {
-        if (plugin.transactionSync() == null || player == null) {
-            return 0;
-        }
-        final PlayerData data = plugin.getPlayerData(player);
-        final short actionId = data.nextTransactionActionId();
-        plugin.getServer().getScheduler().runTask(plugin, new Runnable() {
-            @Override
-            public void run() {
-                if (!player.isOnline()) {
-                    return;
-                }
-                plugin.transactionSync().sendReservedTransaction(player, actionId);
-            }
-        });
-        return actionId;
     }
 
     private void disableMovementCapture(String reason) {

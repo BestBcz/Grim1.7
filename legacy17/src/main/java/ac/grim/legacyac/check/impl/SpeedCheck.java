@@ -61,7 +61,7 @@ public final class SpeedCheck extends Check {
 
         // Extra tolerance only for non-aligned state (lag/pending changes)
         // Do NOT subtract budget again — it was already subtracted in prediction
-        if (!state.isFullyAligned()) {
+        if (!state.isEnforceable()) {
             offset = Math.max(0.0D, offset
                     - plugin.getConfig().getDouble("adaptive-lag.pending-state-margin", 0.06D));
         } else if (isLagging(data)) {
@@ -69,16 +69,14 @@ public final class SpeedCheck extends Check {
                     - plugin.getConfig().getDouble("adaptive-lag.speed-small-margin", 0.03D));
         }
 
-        if (data.isDebugEnabled()) {
-            double horizontal = data.getLastDeltaXZ();
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName()
-                    + " Speed post h=" + fmt(horizontal)
-                    + " reducedHDev=" + fmt(reducedHorizontalDeviation)
-                    + " offset=" + fmt(offset)
-                    + " advantage=" + fmt(data.getBuffer(ADVANTAGE_KEY))
-                    + " pending=" + state.getPendingChanges()
-                    + " best=" + data.getPredictionBestProfile());
-        }
+        double horizontal = data.getLastDeltaXZ();
+        debug(data, player, "speed-post",
+                "h", fmt(horizontal),
+                "reducedHDev", fmt(reducedHorizontalDeviation),
+                "offset", fmt(offset),
+                "adv", fmt(data.getBuffer(ADVANTAGE_KEY)),
+                "pending", String.valueOf(state.getPendingChanges()),
+                "best", data.getPredictionBestProfile());
 
         // Grim OffsetHandler pattern
         // Increased threshold to 0.005 to absorb 1.7.10 MathHelper/Float noise
@@ -139,13 +137,11 @@ public final class SpeedCheck extends Check {
         double buffer = increaseBuffer(data, increase);
         double flagBuffer = plugin.getConfig().getDouble("pipeline.minimal-post.thresholds.speed-buffer", 4.5D);
 
-        if (data.isDebugEnabled()) {
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName()
-                    + " Speed minimal post h=" + fmt(horizontal)
-                    + " threshold=" + fmt(conservativeThreshold)
-                    + " overflow=" + fmt(overflow)
-                    + " buffer=" + fmt(buffer));
-        }
+        debug(data, player, "speed-minimal-post",
+                "h", fmt(horizontal),
+                "threshold", fmt(conservativeThreshold),
+                "overflow", fmt(overflow),
+                "buffer", fmt(buffer));
 
         if (buffer > flagBuffer) {
             flag(player, data, overflow, "minimal-post h=" + fmt(horizontal)

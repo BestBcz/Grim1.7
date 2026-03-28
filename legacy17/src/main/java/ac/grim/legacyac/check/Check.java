@@ -3,8 +3,10 @@ package ac.grim.legacyac.check;
 import ac.grim.legacyac.LegacyAntiCheatPlugin;
 import ac.grim.legacyac.data.PlayerData;
 import ac.grim.legacyac.debug.DetectionEvidence;
+import ac.grim.legacyac.enforcement.LegacySetbackController;
 import ac.grim.legacyac.regression.ViolationLedger;
 import ac.grim.legacyac.tolerance.ToleranceBudgetEngine;
+import ac.grim.legacyac.util.LogMessageFormatter;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -167,15 +169,15 @@ public abstract class Check {
 
     protected void logAdaptiveLagComparison(Player player, PlayerData data, String checkName, double baseLimit,
             double finalLimit, String note) {
-        if (!plugin.getConfig().getBoolean("adaptive-lag.compare-log-enabled", false)) {
+        if (!LogMessageFormatter.isBudgetBreakdownEnabled(plugin.getConfig())) {
             return;
         }
-        plugin.getLogger().info("[GLAC-LAG-COMPARE] player=" + player.getName()
-                + " check=" + checkName
-                + " pending=" + data.getPendingWorldChangesCount()
-                + " base=" + String.format(Locale.ROOT, "%.4f", baseLimit)
-                + " final=" + String.format(Locale.ROOT, "%.4f", finalLimit)
-                + " note=" + note);
+        plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(),
+                "lag-compare:" + checkName,
+                "pending", String.valueOf(data.getPendingWorldChangesCount()),
+                "base", String.format(Locale.ROOT, "%.4f", baseLimit),
+                "final", String.format(Locale.ROOT, "%.4f", finalLimit),
+                "note", note));
     }
 
     protected void recordEvidence(PlayerData data, double offset, String sourceOverride) {
@@ -217,20 +219,21 @@ public abstract class Check {
             ledger.record(name, entry);
         }
 
-        if (data.isDebugEnabled()) {
-            String evidence = "[" + name + "] P:" + String.format(Locale.ROOT, "%.2f", amount)
-                    + ", RTT:" + String.format(Locale.ROOT, "%.0fms", data.getLastTransactionRttNanos() / 1000000.0D)
-                    + ", Tick:" + data.getMoveWindow()
-                    + ", Buffer:" + String.format(Locale.ROOT, "%.2f", data.getBuffer(name))
-                    + ", Budget:" + budgetTag
-                    + ", Detail:" + detail;
-            plugin.getLogger().info("[GLAC-DEBUG] " + player.getName() + " " + evidence);
-        }
-        plugin.alerts().alert(player, name, vl, detail + " [budget=" + budgetTag + "]");
+        debug(data, player, "flag:" + name,
+                "add", String.format(Locale.ROOT, "%.2f", amount),
+                "vl", String.format(Locale.ROOT, "%.2f", vl),
+                "buf", String.format(Locale.ROOT, "%.2f", data.getBuffer(name)),
+                "rtt", String.format(Locale.ROOT, "%.0fms", data.getLastTransactionRttNanos() / 1000000.0D),
+                "frame", String.valueOf(data.getMoveWindow()),
+                "budget", budgetTag,
+                "detail", detail);
+        plugin.alerts().alert(player, name, vl, detail, budgetTag, data.getDetectionSource());
 
         if (vl >= getMaxViolation() && plugin.getConfig().getBoolean("checks." + name + ".setback", true)
-                && data.getLastSafeLocation() != null) {
-            player.teleport(data.getLastSafeLocation());
+                && plugin.setbacks() != null) {
+            plugin.setbacks().requestCorrection(player, data,
+                    LegacySetbackController.CorrectionReason.CHECK_VIOLATION,
+                    LegacySetbackController.CorrectionSeverity.HARD, name + " " + detail);
         }
 
         runPunishments(player, data, vl);
@@ -250,5 +253,12 @@ public abstract class Check {
             plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), parsed);
         }
         data.markPunishExecuted(name);
+    }
+
+    protected void debug(PlayerData data, Player player, String label, String... keyValues) {
+        if (!data.isDebugEnabled()) {
+            return;
+        }
+        plugin.getLogger().info(LogMessageFormatter.debugLine(plugin.getConfig(), player.getName(), label, keyValues));
     }
 }

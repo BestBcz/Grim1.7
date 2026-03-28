@@ -195,6 +195,18 @@ public final class LegacyPredictionEngine {
 
         double carriedMomX = prevMotionX * friction;
         double carriedMomZ = prevMotionZ * friction;
+        double authoritativeVelX = 0.0D;
+        double authoritativeVelY = 0.0D;
+        double authoritativeVelZ = 0.0D;
+        boolean hasAuthoritativeVelocity = false;
+        if (context != null && context.isRecentVelocity()) {
+            authoritativeVelX = context.getExpectedVelocityX();
+            authoritativeVelY = context.getExpectedVelocityY();
+            authoritativeVelZ = context.getExpectedVelocityZ();
+            hasAuthoritativeVelocity = Math.abs(authoritativeVelX) > 1.0E-4D
+                    || Math.abs(authoritativeVelY) > 1.0E-4D
+                    || Math.abs(authoritativeVelZ) > 1.0E-4D;
+        }
 
         boolean liquidRestricted = context != null && context.isInLiquid();
 
@@ -270,6 +282,11 @@ public final class LegacyPredictionEngine {
         if (context != null && context.isRecentVelocity()) {
             verticalCandidates.add(lastDeltaY);
             verticalCandidates.add(lastDeltaY * 0.96D);
+            if (hasAuthoritativeVelocity) {
+                verticalCandidates.add(authoritativeVelY);
+                verticalCandidates.add((authoritativeVelY - GRAVITY) * Y_DRAG);
+                verticalCandidates.add(authoritativeVelY * 0.98D);
+            }
         }
         if (context != null && context.isRecentHighFall()) {
             int recovery = Math.max(6, Math.min(10, highFallRecoveryTicks));
@@ -318,6 +335,12 @@ public final class LegacyPredictionEngine {
                         String profile = "vector:f=0.0,s=0.0,y=" + String.format("%.2f", yCandidate);
                         CandidateVelocity c = new CandidateVelocity(profile, totalX, yCandidate, totalZ);
                         candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, c, onGround));
+                        if (hasAuthoritativeVelocity) {
+                            String txProfile = "tx-velocity:f=0.0,s=0.0,y=" + String.format("%.2f", yCandidate);
+                            CandidateVelocity tx = new CandidateVelocity(txProfile, authoritativeVelX, yCandidate,
+                                    authoritativeVelZ);
+                            candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, tx, onGround));
+                        }
                     }
                     continue;
                 }
@@ -348,6 +371,15 @@ public final class LegacyPredictionEngine {
                     String profile = "vector:f=" + f_in + ",s=" + s_in + ",y=" + String.format("%.2f", yCandidate);
                     CandidateVelocity c = new CandidateVelocity(profile, totalX, yCandidate, totalZ);
                     candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, c, onGround));
+                    if (hasAuthoritativeVelocity) {
+                        double txX = authoritativeVelX + accelX;
+                        double txZ = authoritativeVelZ + accelZ;
+                        if (Math.abs(txX) < MOVEMENT_THRESHOLD) txX = 0.0D;
+                        if (Math.abs(txZ) < MOVEMENT_THRESHOLD) txZ = 0.0D;
+                        String txProfile = "tx-velocity:f=" + f_in + ",s=" + s_in + ",y=" + String.format("%.2f", yCandidate);
+                        CandidateVelocity tx = new CandidateVelocity(txProfile, txX, yCandidate, txZ);
+                        candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, tx, onGround));
+                    }
 
                     // Wall collision candidates: Handle hitting a wall by zeroing axes
                     candidates.add(new CandidateVelocity(profile + ",wall-x", 0.0D, yCandidate, totalZ));
@@ -400,6 +432,16 @@ public final class LegacyPredictionEngine {
                         String profile = "vector-sprint-jump:f=" + f_in + ",s=" + s_in + ",y=" + String.format("%.2f", yCandidate);
                         CandidateVelocity c = new CandidateVelocity(profile, totalX, yCandidate, totalZ);
                         candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, c, onGround));
+                        if (hasAuthoritativeVelocity) {
+                            double txX = authoritativeVelX + ax;
+                            double txZ = authoritativeVelZ + az;
+                            if (Math.abs(txX) < MOVEMENT_THRESHOLD) txX = 0.0D;
+                            if (Math.abs(txZ) < MOVEMENT_THRESHOLD) txZ = 0.0D;
+                            String txProfile = "tx-velocity-sprint-jump:f=" + f_in + ",s=" + s_in + ",y="
+                                    + String.format("%.2f", yCandidate);
+                            CandidateVelocity tx = new CandidateVelocity(txProfile, txX, yCandidate, txZ);
+                            candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, tx, onGround));
+                        }
 
                         // Wall collision for sprint jumping
                         candidates.add(new CandidateVelocity(profile + ",wall-x", 0.0D, yCandidate, totalZ));
@@ -416,6 +458,11 @@ public final class LegacyPredictionEngine {
 
 
         if (context != null && context.isRecentVelocity()) {
+            if (hasAuthoritativeVelocity) {
+                CandidateVelocity authoritative = new CandidateVelocity("ctx-tx-velocity",
+                        authoritativeVelX, authoritativeVelY, authoritativeVelZ);
+                candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, authoritative, onGround));
+            }
             CandidateVelocity inertia = new CandidateVelocity("ctx-velocity-inertia",
                     prevMotionX * 0.91D, lastDeltaY, prevMotionZ * 0.91D);
             candidates.add(CollisionResolver.resolve(player, feetBlock, belowBlock, inertia, onGround));

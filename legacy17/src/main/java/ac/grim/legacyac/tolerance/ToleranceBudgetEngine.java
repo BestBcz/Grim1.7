@@ -186,8 +186,7 @@ public final class ToleranceBudgetEngine {
          */
         public String toDebugString() {
             return String.format(Locale.ROOT,
-                    "budget[move=%.4f reach=%.4f vel=%.4f] inputs[rtt=%.0fms jitter=%.0fms tps=%.1f] " +
-                            "factors[lat=%.3f jit=%.3f tps=%.3f scenario=%s addon=%.4f pending=%.4f]",
+                    "move=%.4f | reach=%.4f | vel=%.4f | rtt=%.0fms | jitter=%.0fms | tps=%.1f | lat=%.3f | jit=%.3f | tpsFactor=%.3f | scene=%s | addon=%.4f | pending=%.4f",
                     movementAllowance, combatReachMargin, velocityResponseSlack,
                     rttMs, jitterMs, tps,
                     latencyFactor, jitterFactor, tpsFactor,
