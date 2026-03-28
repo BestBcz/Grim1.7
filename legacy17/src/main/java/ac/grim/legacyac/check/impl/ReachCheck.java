@@ -8,6 +8,7 @@ import ac.grim.legacyac.data.FrameContextSnapshot;
 import ac.grim.legacyac.data.PlayerData;
 import ac.grim.legacyac.evidence.CombatEvidence;
 import ac.grim.legacyac.tolerance.ToleranceBudgetEngine;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -20,6 +21,8 @@ import org.bukkit.util.Vector;
 
 public final class ReachCheck extends Check {
     private static final double MOVEMENT_THRESHOLD = 0.03D;
+    private static final long ATTACK_HISTORY_FUTURE_SLACK_NANOS = 75000000L;
+    private static final long SWEEP_FRAME_MAX_GAP_MS = 175L;
     private static final String CANCEL_BUFFER_KEY = "Reach.cancelBuffer";
     private final Map<UUID, RecentPacketReach> recentPacketReach = new ConcurrentHashMap<UUID, RecentPacketReach>();
 
@@ -274,11 +277,14 @@ public final class ReachCheck extends Check {
         boolean enforceableWindow = true;
         long now = System.currentTimeMillis();
 
-        List<HitboxFrame> frames = targetData.getHitboxHistorySnapshot(backtrackMillis);
+        List<HitboxFrame> frames = buildAttackFrames(targetData, backtrackMillis, snapshot);
+        if (frames.isEmpty()) {
+            return new AttackEvaluation(true, 0.0D, 0L, false, false, ReachEvidenceType.NONE);
+        }
         for (HitboxFrame frame : frames) {
             if (RayTraceUtil.isVecInside(origin, expandedFrame(frame, hitboxExpand))) {
                 return new AttackEvaluation(true, 0.0D, now - frame.getTimestampMillis(), frame.isTeleportMarker(),
-                        frame.isEnforceable(), ReachEvidenceType.NONE);
+                        isMovementFrameTrusted(frame), ReachEvidenceType.NONE);
             }
 
             HitboxFrame expanded = expandedFrame(frame, hitboxExpand);
@@ -287,7 +293,7 @@ public final class ReachCheck extends Check {
                 closestIntersection = dist;
                 hitOffset = now - frame.getTimestampMillis();
                 markerHit = frame.isTeleportMarker();
-                enforceableWindow = frame.isEnforceable();
+                enforceableWindow = isMovementFrameTrusted(frame);
             }
 
             double altDist = RayTraceUtil.intersectionDistance(origin, altDir, rayLength, expanded);
@@ -295,7 +301,7 @@ public final class ReachCheck extends Check {
                 closestIntersection = altDist;
                 hitOffset = now - frame.getTimestampMillis();
                 markerHit = frame.isTeleportMarker();
-                enforceableWindow = frame.isEnforceable();
+                enforceableWindow = isMovementFrameTrusted(frame);
             }
 
             double syncLeftDist = RayTraceUtil.intersectionDistance(origin, syncLeftDir, rayLength, expanded);
@@ -303,7 +309,7 @@ public final class ReachCheck extends Check {
                 closestIntersection = syncLeftDist;
                 hitOffset = now - frame.getTimestampMillis();
                 markerHit = frame.isTeleportMarker();
-                enforceableWindow = frame.isEnforceable();
+                enforceableWindow = isMovementFrameTrusted(frame);
             }
 
             double syncRightDist = RayTraceUtil.intersectionDistance(origin, syncRightDir, rayLength, expanded);
@@ -311,11 +317,7 @@ public final class ReachCheck extends Check {
                 closestIntersection = syncRightDist;
                 hitOffset = now - frame.getTimestampMillis();
                 markerHit = frame.isTeleportMarker();
-                enforceableWindow = frame.isEnforceable();
-            }
-
-            if (!frame.isEnforceable() || !frame.isTransactionAligned()) {
-                enforceableWindow = false;
+                enforceableWindow = isMovementFrameTrusted(frame);
             }
         }
 
@@ -335,7 +337,7 @@ public final class ReachCheck extends Check {
                 minReachToBox = dist;
                 markerHit = frame.isTeleportMarker();
                 hitOffset = now - frame.getTimestampMillis();
-                closestBoxEnforceable = frame.isEnforceable();
+                closestBoxEnforceable = isMovementFrameTrusted(frame);
             }
         }
 
@@ -368,9 +370,82 @@ public final class ReachCheck extends Check {
     }
 
     private static HitboxFrame expandedFrame(HitboxFrame frame, double expand) {
-        return new HitboxFrame(frame.getTimestampMillis(), frame.isTeleportMarker(), frame.isTransactionAligned(),
+        return new HitboxFrame(frame.getTimestampMillis(), frame.getTimestampNanos(),
+                frame.isTeleportMarker(), frame.isTransactionAligned(),
                 frame.isEnforceable(), frame.getMinX() - expand, frame.getMinY(), frame.getMinZ() - expand,
                 frame.getMaxX() + expand, frame.getMaxY(), frame.getMaxZ() + expand);
+    }
+
+    private List<HitboxFrame> buildAttackFrames(PlayerData targetData, long backtrackMillis,
+            PlayerData.QueuedAttackSnapshot snapshot) {
+        List<HitboxFrame> history = snapshot != null
+                ? targetData.getHitboxHistorySnapshot(backtrackMillis, snapshot.getCreatedAtNanos(),
+                        ATTACK_HISTORY_FUTURE_SLACK_NANOS)
+                : targetData.getHitboxHistorySnapshot(backtrackMillis);
+        if (history.isEmpty()) {
+            return history;
+        }
+
+        List<HitboxFrame> expanded = new ArrayList<HitboxFrame>(history.size() * 2);
+        for (int i = 0; i < history.size(); i++) {
+            HitboxFrame current = history.get(i);
+            expanded.add(current);
+            if (i + 1 >= history.size()) {
+                continue;
+            }
+
+            HitboxFrame previous = history.get(i + 1);
+            if (!shouldSweepFrames(current, previous)) {
+                continue;
+            }
+            expanded.add(sweptFrame(current, previous));
+        }
+        return expanded;
+    }
+
+    private static boolean shouldSweepFrames(HitboxFrame newer, HitboxFrame older) {
+        if (newer.isTeleportMarker() || older.isTeleportMarker()) {
+            return false;
+        }
+        if (Math.abs(newer.getTimestampMillis() - older.getTimestampMillis()) > SWEEP_FRAME_MAX_GAP_MS) {
+            return false;
+        }
+
+        double centerDx = frameCenterX(newer) - frameCenterX(older);
+        double centerDy = frameCenterY(newer) - frameCenterY(older);
+        double centerDz = frameCenterZ(newer) - frameCenterZ(older);
+        return (centerDx * centerDx) + (centerDy * centerDy) + (centerDz * centerDz) > 1.0E-4D;
+    }
+
+    private static HitboxFrame sweptFrame(HitboxFrame newer, HitboxFrame older) {
+        long timestampMillis = Math.max(newer.getTimestampMillis(), older.getTimestampMillis());
+        long timestampNanos = Math.max(newer.getTimestampNanos(), older.getTimestampNanos());
+        boolean teleportMarker = newer.isTeleportMarker() || older.isTeleportMarker();
+        boolean transactionAligned = newer.isTransactionAligned() && older.isTransactionAligned();
+        boolean enforceable = newer.isEnforceable() && older.isEnforceable();
+        return new HitboxFrame(timestampMillis, timestampNanos, teleportMarker, transactionAligned, enforceable,
+                Math.min(newer.getMinX(), older.getMinX()),
+                Math.min(newer.getMinY(), older.getMinY()),
+                Math.min(newer.getMinZ(), older.getMinZ()),
+                Math.max(newer.getMaxX(), older.getMaxX()),
+                Math.max(newer.getMaxY(), older.getMaxY()),
+                Math.max(newer.getMaxZ(), older.getMaxZ()));
+    }
+
+    private static boolean isMovementFrameTrusted(HitboxFrame frame) {
+        return frame.isEnforceable() && frame.isTransactionAligned();
+    }
+
+    private static double frameCenterX(HitboxFrame frame) {
+        return (frame.getMinX() + frame.getMaxX()) * 0.5D;
+    }
+
+    private static double frameCenterY(HitboxFrame frame) {
+        return (frame.getMinY() + frame.getMaxY()) * 0.5D;
+    }
+
+    private static double frameCenterZ(HitboxFrame frame) {
+        return (frame.getMinZ() + frame.getMaxZ()) * 0.5D;
     }
 
     private static Vector getDirection(float yaw, float pitch) {

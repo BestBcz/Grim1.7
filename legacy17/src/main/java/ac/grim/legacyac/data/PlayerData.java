@@ -212,6 +212,10 @@ public final class PlayerData {
     // 闁冲厜鍋撻柍鍏夊亾 Movement 闁冲厜鍋撻柍鍏夊亾
 
     public void handleMove(Player player, Location from, Location to, boolean onGround) {
+        handleMove(player, from, to, onGround, System.nanoTime());
+    }
+
+    public void handleMove(Player player, Location from, Location to, boolean onGround, long frameTimestampNanos) {
         compensation.applyPendingWorldChanges();
         movement.onMove(from, to, onGround, player.isSprinting(), player.isSneaking());
         compensation.tickSlotSwitchGrace();
@@ -223,7 +227,7 @@ public final class PlayerData {
         boolean transactionAligned = movementSnapshot.isTeleportAligned() && movementSnapshot.isVelocityAligned();
         boolean enforceable = transactionAligned && !compensation.isTeleportSyncPending();
         combat.recordHitbox(to.getX(), to.getY(), to.getZ(), width, height,
-                teleportMarker, transactionAligned, enforceable);
+                teleportMarker, transactionAligned, enforceable, frameTimestampNanos);
 
         compensation.tickVelocityWindow(movement.getLastDeltaXZ(), movement.getLastDeltaY());
 
@@ -403,6 +407,11 @@ public final class PlayerData {
         return combat.getHitboxHistorySnapshot(maxAgeMillis);
     }
 
+    public List<HitboxFrame> getHitboxHistorySnapshot(long maxAgeMillis, long maxTimestampNanos,
+            long futureSlackNanos) {
+        return combat.getHitboxHistorySnapshot(maxAgeMillis, maxTimestampNanos, futureSlackNanos);
+    }
+
     // 闁冲厜鍋撻柍鍏夊亾 Network 闁冲厜鍋撻柍鍏夊亾
 
     public long getLastTransactionRttNanos() {
@@ -563,6 +572,10 @@ public final class PlayerData {
 
     public double getExpectedVelX() {
         return compensation.getExpectedVelX();
+    }
+
+    public double getExpectedVelY() {
+        return compensation.getExpectedVelY();
     }
 
     public double getExpectedVelZ() {
@@ -1129,6 +1142,18 @@ public final class PlayerData {
 
         public boolean isRecentVelocity() {
             return env.isRecentVelocity();
+        }
+
+        public double getExpectedVelocityX() {
+            return data.getExpectedVelX();
+        }
+
+        public double getExpectedVelocityY() {
+            return data.getExpectedVelY();
+        }
+
+        public double getExpectedVelocityZ() {
+            return data.getExpectedVelZ();
         }
 
         public boolean isRecentRodPull() {

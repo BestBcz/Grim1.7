@@ -167,7 +167,7 @@ final class MovementPipeline {
                 : null;
 
         data.flushCompensatedWorld();
-        data.handleMove(player, from, to, frame.isOnGround());
+        data.handleMove(player, from, to, frame.isOnGround(), frame.getTimestampNanos());
         data.preloadCompensatedWorld(player, 1);
         data.setDetectionContext(frame.getSource().name(), data.getMoveWindow());
 

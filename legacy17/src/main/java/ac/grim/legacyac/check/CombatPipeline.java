@@ -3,18 +3,19 @@ package ac.grim.legacyac.check;
 import ac.grim.legacyac.LegacyAntiCheatPlugin;
 import ac.grim.legacyac.check.impl.KillAuraCheck;
 import ac.grim.legacyac.check.impl.ReachCheck;
+import ac.grim.legacyac.combat.HitboxFrame;
 import ac.grim.legacyac.combat.EntityIdIndex;
 import ac.grim.legacyac.data.FrameContextSnapshot;
 import ac.grim.legacyac.data.PlayerData;
 import ac.grim.legacyac.util.LogMessageFormatter;
 import java.util.List;
 import java.util.Locale;
-import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 
 final class CombatPipeline {
+    private static final long ATTACK_HISTORY_FUTURE_SLACK_NANOS = 75000000L;
     private final LegacyAntiCheatPlugin plugin;
     private final EntityIdIndex entityIdIndex;
     private final List<ReachCheck> reachChecks;
@@ -63,15 +64,10 @@ final class CombatPipeline {
             return;
         }
 
-        double[] targetBox = plugin.resolveEntityBox(target);
-        Location targetLoc = target.getLocation();
-        boolean teleportMarker = System.currentTimeMillis() - targetData.getLastTeleportOrPearlAt() <= 400L;
-        boolean transactionAligned = targetData.hasRecentTransactionAck(2000L);
-        boolean enforceable = transactionAligned && !targetData.isTeleportSyncPending();
-        targetData.recordCurrentHitbox(targetLoc.getX(), targetLoc.getY(), targetLoc.getZ(), targetBox[0], targetBox[1],
-                teleportMarker, transactionAligned, enforceable);
-
-        java.util.List<ac.grim.legacyac.combat.HitboxFrame> attackFrames = targetData.getHitboxHistorySnapshot(400L);
+        long attackCreatedAtNanos = snapshot == null ? 0L : snapshot.getCreatedAtNanos();
+        List<HitboxFrame> attackFrames = attackCreatedAtNanos > 0L
+                ? targetData.getHitboxHistorySnapshot(400L, attackCreatedAtNanos, ATTACK_HISTORY_FUTURE_SLACK_NANOS)
+                : targetData.getHitboxHistorySnapshot(400L);
         if (!attackFrames.isEmpty()) {
             FrameContextSnapshot attackerFrameContext = attackerData.getCurrentFrameContext();
             if (attackerFrameContext != null) {

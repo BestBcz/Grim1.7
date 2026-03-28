@@ -179,6 +179,9 @@ public final class KillAuraCheck extends Check {
         if (reachEval == null || reachEval.isLegal()) {
             return false;
         }
+        if (!reachEval.isEnforceableWindow() || reachEval.isTeleportMarkerHit()) {
+            return false;
+        }
 
         double add = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS ? 0.70D : 0.80D;
         double buffer = slideAndAddScore(data, add, 1.0D);

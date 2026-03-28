@@ -31,6 +31,7 @@ public final class CompensationState {
     private double expectedVelocityXZ;
     private double expectedVelocityY;
     private double expectedVelX;
+    private double expectedVelY;
     private double expectedVelZ;
     private double observedVelocityXZ;
     private double observedVelocityY;
@@ -111,6 +112,7 @@ public final class CompensationState {
     public void armVelocityWindow(double vx, double vz, double vy, int ticks) {
         synchronized (lock) {
             expectedVelX = vx;
+            expectedVelY = vy;
             expectedVelZ = vz;
             expectedVelocityXZ = Math.sqrt(vx * vx + vz * vz);
             expectedVelocityY = Math.abs(vy);
@@ -142,6 +144,7 @@ public final class CompensationState {
             expectedVelocityXZ = 0.0D;
             expectedVelocityY = 0.0D;
             expectedVelX = 0.0D;
+            expectedVelY = 0.0D;
             expectedVelZ = 0.0D;
             observedVelocityXZ = 0.0D;
             observedVelocityY = 0.0D;
@@ -333,6 +336,12 @@ public final class CompensationState {
     public double getExpectedVelX() {
         synchronized (lock) {
             return expectedVelX;
+        }
+    }
+
+    public double getExpectedVelY() {
+        synchronized (lock) {
+            return expectedVelY;
         }
     }
 
