@@ -597,6 +597,10 @@ public final class PlayerData {
         compensatedWorld.preloadAround(player, radiusChunks);
     }
 
+    public void flushCompensatedWorld() {
+        compensatedWorld.flushAcknowledgedUpdates();
+    }
+
     public void queueCompensatedChunkRefresh(Player player, int chunkX, int chunkZ, String reason) {
         queueCompensatedChunkRefresh(player, chunkX, chunkZ, (short) 0, reason);
     }

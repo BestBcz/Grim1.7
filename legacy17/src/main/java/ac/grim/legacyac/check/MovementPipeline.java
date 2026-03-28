@@ -166,6 +166,7 @@ final class MovementPipeline {
                 ? new PipelineTrace(pipelineStart, player.getName())
                 : null;
 
+        data.flushCompensatedWorld();
         data.handleMove(player, from, to, frame.isOnGround());
         data.preloadCompensatedWorld(player, 1);
         data.setDetectionContext(frame.getSource().name(), data.getMoveWindow());

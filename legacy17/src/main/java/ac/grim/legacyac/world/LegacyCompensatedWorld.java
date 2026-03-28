@@ -16,8 +16,11 @@ public final class LegacyCompensatedWorld {
     private final Map<String, Map<Long, ChunkCache>> worldChunks = new ConcurrentHashMap<String, Map<Long, ChunkCache>>();
     private final LinkedList<PendingChunkRefresh> pendingChunkRefreshes = new LinkedList<PendingChunkRefresh>();
     private final LinkedList<PendingBlockUpdate> pendingBlockUpdates = new LinkedList<PendingBlockUpdate>();
+    private final LinkedList<PendingChunkRefresh> acknowledgedChunkRefreshes = new LinkedList<PendingChunkRefresh>();
+    private final LinkedList<PendingBlockUpdate> acknowledgedBlockUpdates = new LinkedList<PendingBlockUpdate>();
 
     public void preloadAround(Player player, int radiusChunks) {
+        flushAcknowledgedUpdates();
         if (player == null) {
             return;
         }
@@ -62,16 +65,29 @@ public final class LegacyCompensatedWorld {
         if (actionId == 0) {
             return;
         }
-        applyAnchoredChunkRefreshes(actionId);
-        applyAnchoredBlockUpdates(actionId);
+        promoteAnchoredChunkRefreshes(actionId);
+        promoteAnchoredBlockUpdates(actionId);
+        flushAcknowledgedUpdates();
+    }
+
+    public void flushAcknowledgedUpdates() {
+        expirePending();
+        if (!Bukkit.isPrimaryThread()) {
+            return;
+        }
+        applyAcknowledgedChunkRefreshes();
+        applyAcknowledgedBlockUpdates();
     }
 
     public LegacyBlockState getBlockState(World world, int x, int y, int z) {
-        expirePending();
+        flushAcknowledgedUpdates();
         if (world == null || y < 0 || y > 255) {
             return LegacyBlockState.AIR;
         }
         ChunkCache chunk = ensureChunkSnapshot(world, x >> 4, z >> 4);
+        if (chunk == null) {
+            return LegacyBlockState.AIR;
+        }
         return chunk.getBlockState(x & 15, y, z & 15);
     }
 
@@ -83,7 +99,7 @@ public final class LegacyCompensatedWorld {
         return getBlockState(world, x, y, z).getData();
     }
 
-    private void applyAnchoredChunkRefreshes(short actionId) {
+    private void promoteAnchoredChunkRefreshes(short actionId) {
         synchronized (pendingChunkRefreshes) {
             Iterator<PendingChunkRefresh> iterator = pendingChunkRefreshes.iterator();
             while (iterator.hasNext()) {
@@ -91,16 +107,16 @@ public final class LegacyCompensatedWorld {
                 if (refresh.anchorTransactionId != actionId) {
                     continue;
                 }
-                World world = Bukkit.getWorld(refresh.worldName);
-                if (world != null) {
-                    ensureChunkSnapshot(world, refresh.chunkX, refresh.chunkZ).snapshot(world, refresh.chunkX, refresh.chunkZ);
+                synchronized (acknowledgedChunkRefreshes) {
+                    acknowledgedChunkRefreshes.add(refresh);
+                    trimAcknowledgedChunkRefreshes();
                 }
                 iterator.remove();
             }
         }
     }
 
-    private void applyAnchoredBlockUpdates(short actionId) {
+    private void promoteAnchoredBlockUpdates(short actionId) {
         synchronized (pendingBlockUpdates) {
             Iterator<PendingBlockUpdate> iterator = pendingBlockUpdates.iterator();
             while (iterator.hasNext()) {
@@ -108,10 +124,43 @@ public final class LegacyCompensatedWorld {
                 if (update.anchorTransactionId != actionId) {
                     continue;
                 }
+                synchronized (acknowledgedBlockUpdates) {
+                    acknowledgedBlockUpdates.add(update);
+                    trimAcknowledgedBlockUpdates();
+                }
+                iterator.remove();
+            }
+        }
+    }
+
+    private void applyAcknowledgedChunkRefreshes() {
+        synchronized (acknowledgedChunkRefreshes) {
+            Iterator<PendingChunkRefresh> iterator = acknowledgedChunkRefreshes.iterator();
+            while (iterator.hasNext()) {
+                PendingChunkRefresh refresh = iterator.next();
+                World world = Bukkit.getWorld(refresh.worldName);
+                if (world != null) {
+                    ChunkCache chunk = ensureChunkSnapshot(world, refresh.chunkX, refresh.chunkZ);
+                    if (chunk != null) {
+                        chunk.snapshot(world, refresh.chunkX, refresh.chunkZ);
+                    }
+                }
+                iterator.remove();
+            }
+        }
+    }
+
+    private void applyAcknowledgedBlockUpdates() {
+        synchronized (acknowledgedBlockUpdates) {
+            Iterator<PendingBlockUpdate> iterator = acknowledgedBlockUpdates.iterator();
+            while (iterator.hasNext()) {
+                PendingBlockUpdate update = iterator.next();
                 World world = Bukkit.getWorld(update.worldName);
                 if (world != null) {
                     ChunkCache chunk = ensureChunkSnapshot(world, update.x >> 4, update.z >> 4);
-                    chunk.setBlockState(update.x & 15, update.y, update.z & 15, update.type, update.data);
+                    if (chunk != null) {
+                        chunk.setBlockState(update.x & 15, update.y, update.z & 15, update.type, update.data);
+                    }
                 }
                 iterator.remove();
             }
@@ -128,8 +177,24 @@ public final class LegacyCompensatedWorld {
                 }
             }
         }
+        synchronized (acknowledgedChunkRefreshes) {
+            Iterator<PendingChunkRefresh> iterator = acknowledgedChunkRefreshes.iterator();
+            while (iterator.hasNext()) {
+                if (iterator.next().expiresAtMillis <= now) {
+                    iterator.remove();
+                }
+            }
+        }
         synchronized (pendingBlockUpdates) {
             Iterator<PendingBlockUpdate> iterator = pendingBlockUpdates.iterator();
+            while (iterator.hasNext()) {
+                if (iterator.next().expiresAtMillis <= now) {
+                    iterator.remove();
+                }
+            }
+        }
+        synchronized (acknowledgedBlockUpdates) {
+            Iterator<PendingBlockUpdate> iterator = acknowledgedBlockUpdates.iterator();
             while (iterator.hasNext()) {
                 if (iterator.next().expiresAtMillis <= now) {
                     iterator.remove();
@@ -150,6 +215,9 @@ public final class LegacyCompensatedWorld {
         long key = toChunkKey(chunkX, chunkZ);
         ChunkCache cache = chunks.get(key);
         if (cache == null) {
+            if (!Bukkit.isPrimaryThread()) {
+                return null;
+            }
             cache = new ChunkCache();
             ChunkCache existing = chunks.putIfAbsent(key, cache);
             if (existing != null) {
@@ -174,6 +242,18 @@ public final class LegacyCompensatedWorld {
     private void trimBlockUpdates() {
         while (pendingBlockUpdates.size() > 4096) {
             pendingBlockUpdates.removeFirst();
+        }
+    }
+
+    private void trimAcknowledgedChunkRefreshes() {
+        while (acknowledgedChunkRefreshes.size() > 512) {
+            acknowledgedChunkRefreshes.removeFirst();
+        }
+    }
+
+    private void trimAcknowledgedBlockUpdates() {
+        while (acknowledgedBlockUpdates.size() > 4096) {
+            acknowledgedBlockUpdates.removeFirst();
         }
     }
 
