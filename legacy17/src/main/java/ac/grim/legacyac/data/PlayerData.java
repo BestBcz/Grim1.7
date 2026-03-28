@@ -1334,6 +1334,11 @@ public final class PlayerData {
     public void resetSameTickPlaceCount() { sameTickPlaceCount = 0; }
 
     public void recordClaimedMovement(double x, double y, double z, float yaw, float pitch, boolean onGround) {
+        recordClaimedMovement(x, y, z, yaw, pitch, onGround, System.nanoTime());
+    }
+
+    public void recordClaimedMovement(double x, double y, double z, float yaw, float pitch, boolean onGround,
+            long timestampNanos) {
         claimedX = x;
         claimedY = y;
         claimedZ = z;
@@ -1342,6 +1347,14 @@ public final class PlayerData {
         claimedOnGround = onGround;
         claimedMovementInitialized = true;
         claimedMoveWindow = getMoveWindow();
+
+        double width = 0.6D;
+        double height = 1.8D;
+        boolean teleportMarker = System.currentTimeMillis() - compensation.getLastTeleportOrPearlAt() <= 400L;
+        CompensationState.MovementStateSnapshot movementSnapshot = compensation.getMovementStateSnapshot();
+        boolean transactionAligned = movementSnapshot.isTeleportAligned() && movementSnapshot.isVelocityAligned();
+        boolean enforceable = transactionAligned && !compensation.isTeleportSyncPending();
+        combat.recordHitbox(x, y, z, width, height, teleportMarker, transactionAligned, enforceable, timestampNanos);
     }
 
     public boolean hasClaimedMovement() {

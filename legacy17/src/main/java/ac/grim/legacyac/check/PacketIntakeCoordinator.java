@@ -76,7 +76,7 @@ final class PacketIntakeCoordinator {
             Boolean onGround = event.getOnGround();
             if (x != null && y != null && z != null && yaw != null && pitch != null && onGround != null) {
                 data.recordClaimedMovement(x.doubleValue(), y.doubleValue(), z.doubleValue(),
-                        yaw.floatValue(), pitch.floatValue(), onGround.booleanValue());
+                        yaw.floatValue(), pitch.floatValue(), onGround.booleanValue(), event.getCreatedAtNanos());
             }
             Boolean hasPos = event.getHasPosition();
             if (pitch != null && yaw != null) {

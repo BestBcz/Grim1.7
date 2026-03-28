@@ -56,6 +56,13 @@ public final class CombatState {
     public synchronized void recordHitbox(double x, double y, double z, double width, double height,
             boolean teleportMarker, boolean transactionAligned, boolean enforceable, long timestampNanos) {
         long now = System.currentTimeMillis();
+        if (!hitboxHistory.isEmpty() && timestampNanos > 0L) {
+            HitboxFrame newest = hitboxHistory.getFirst();
+            if (newest.getTimestampNanos() == timestampNanos) {
+                now = newest.getTimestampMillis();
+                hitboxHistory.removeFirst();
+            }
+        }
         double halfWidth = width * 0.5D;
         hitboxHistory.addFirst(new HitboxFrame(now, timestampNanos, teleportMarker, transactionAligned, enforceable,
                 x - halfWidth, y, z - halfWidth, x + halfWidth, y + height, z + halfWidth));
