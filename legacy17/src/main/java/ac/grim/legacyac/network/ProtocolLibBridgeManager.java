@@ -52,6 +52,7 @@ public final class ProtocolLibBridgeManager {
             registerUseEntityListener();
             registerServerPositionListener();
             registerVelocityListener();
+            registerObservedEntityListeners();
             registerBadPacketsListeners();
             registerBlockPlaceCaptureListener();
             registerWorldStateListeners();
@@ -229,6 +230,118 @@ public final class ProtocolLibBridgeManager {
         };
         protocolManager.addPacketListener(adapter);
         listeners.add(adapter);
+    }
+    private void registerObservedEntityListeners() {
+        PacketAdapter absoluteAdapter = new PacketAdapter(plugin, ListenerPriority.HIGHEST,
+                PacketType.Play.Server.NAMED_ENTITY_SPAWN,
+                PacketType.Play.Server.ENTITY_TELEPORT) {
+            @Override
+            public void onPacketSending(PacketEvent event) {
+                Player viewer = event.getPlayer();
+                Object handle = event.getPacket().getHandle();
+                PacketType type = event.getPacketType();
+
+                Integer entityId = packetReader.readIntegerValue(handle, 0, "a", "entityId");
+                if (entityId == null || entityId.intValue() == viewer.getEntityId()) {
+                    return;
+                }
+
+                double x;
+                double y;
+                double z;
+                if (type == PacketType.Play.Server.NAMED_ENTITY_SPAWN) {
+                    Integer rawX = packetReader.readIntegerValue(handle, 1, "c", "x");
+                    Integer rawY = packetReader.readIntegerValue(handle, 2, "d", "y");
+                    Integer rawZ = packetReader.readIntegerValue(handle, 3, "e", "z");
+                    if (rawX == null || rawY == null || rawZ == null) {
+                        return;
+                    }
+                    x = decodeAbsoluteEntityPosition(rawX.intValue());
+                    y = decodeAbsoluteEntityPosition(rawY.intValue());
+                    z = decodeAbsoluteEntityPosition(rawZ.intValue());
+                } else {
+                    Integer rawX = packetReader.readIntegerValue(handle, 1, "b", "x");
+                    Integer rawY = packetReader.readIntegerValue(handle, 2, "c", "y");
+                    Integer rawZ = packetReader.readIntegerValue(handle, 3, "d", "z");
+                    if (rawX == null || rawY == null || rawZ == null) {
+                        return;
+                    }
+                    x = decodeAbsoluteEntityPosition(rawX.intValue());
+                    y = decodeAbsoluteEntityPosition(rawY.intValue());
+                    z = decodeAbsoluteEntityPosition(rawZ.intValue());
+                }
+
+                Player observed = resolveObservedPlayer(viewer, entityId.intValue());
+                if (observed == null) {
+                    return;
+                }
+
+                double[] box = entityBoxCache.getSize(observed);
+                PlayerData viewerData = ((LegacyAntiCheatPlugin) plugin).getPlayerData(viewer);
+                boolean teleportMarker = type == PacketType.Play.Server.ENTITY_TELEPORT;
+                viewerData.recordObservedHitbox(entityId.intValue(), x, y, z, box[0], box[1], teleportMarker,
+                        true, true, System.nanoTime());
+            }
+        };
+        protocolManager.addPacketListener(absoluteAdapter);
+        listeners.add(absoluteAdapter);
+
+        PacketAdapter relativeAdapter = new PacketAdapter(plugin, ListenerPriority.HIGHEST,
+                PacketType.Play.Server.REL_ENTITY_MOVE,
+                PacketType.Play.Server.ENTITY_MOVE_LOOK) {
+            @Override
+            public void onPacketSending(PacketEvent event) {
+                Player viewer = event.getPlayer();
+                Object handle = event.getPacket().getHandle();
+                Integer entityId = packetReader.readIntegerValue(handle, 0, "a", "entityId");
+                Integer rawDx = packetReader.readIntegerValue(handle, 1, "b", "x");
+                Integer rawDy = packetReader.readIntegerValue(handle, 2, "c", "y");
+                Integer rawDz = packetReader.readIntegerValue(handle, 3, "d", "z");
+                if (entityId == null || rawDx == null || rawDy == null || rawDz == null
+                        || entityId.intValue() == viewer.getEntityId()) {
+                    return;
+                }
+
+                Player observed = resolveObservedPlayer(viewer, entityId.intValue());
+                if (observed == null) {
+                    return;
+                }
+
+                double[] box = entityBoxCache.getSize(observed);
+                PlayerData viewerData = ((LegacyAntiCheatPlugin) plugin).getPlayerData(viewer);
+                long timestampNanos = System.nanoTime();
+                boolean updated = viewerData.recordObservedRelativeHitbox(entityId.intValue(),
+                        decodeRelativeEntityDelta(rawDx.intValue()),
+                        decodeRelativeEntityDelta(rawDy.intValue()),
+                        decodeRelativeEntityDelta(rawDz.intValue()),
+                        box[0], box[1], false, true, true, timestampNanos);
+                if (!updated) {
+                    viewerData.recordObservedHitbox(entityId.intValue(), observed.getLocation().getX(),
+                            observed.getLocation().getY(), observed.getLocation().getZ(), box[0], box[1],
+                            false, true, true, timestampNanos);
+                }
+            }
+        };
+        protocolManager.addPacketListener(relativeAdapter);
+        listeners.add(relativeAdapter);
+
+        PacketAdapter destroyAdapter = new PacketAdapter(plugin, ListenerPriority.HIGHEST,
+                PacketType.Play.Server.ENTITY_DESTROY) {
+            @Override
+            public void onPacketSending(PacketEvent event) {
+                Object handle = event.getPacket().getHandle();
+                int[] ids = packetReader.readIntArrayField(handle, 0, "a", "entityIds");
+                if (ids == null || ids.length == 0) {
+                    return;
+                }
+                PlayerData viewerData = ((LegacyAntiCheatPlugin) plugin).getPlayerData(event.getPlayer());
+                for (int id : ids) {
+                    viewerData.clearObservedEntity(id);
+                }
+            }
+        };
+        protocolManager.addPacketListener(destroyAdapter);
+        listeners.add(destroyAdapter);
     }
     private void registerAckListener() {
         PacketAdapter adapter = new PacketAdapter(plugin, ListenerPriority.HIGHEST,
@@ -439,6 +552,23 @@ public final class ProtocolLibBridgeManager {
         };
         protocolManager.addPacketListener(adapter);
         listeners.add(adapter);
+    }
+
+    private Player resolveObservedPlayer(Player viewer, int entityId) {
+        for (Player candidate : viewer.getWorld().getPlayers()) {
+            if (candidate.getEntityId() == entityId) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static double decodeAbsoluteEntityPosition(int raw) {
+        return raw / 32.0D;
+    }
+
+    private static double decodeRelativeEntityDelta(int raw) {
+        return raw / 32.0D;
     }
 
     private MovementFrame.Source toMovementSource(PacketType type) {

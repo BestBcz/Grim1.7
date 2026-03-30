@@ -34,13 +34,14 @@ public final class KillAuraCheck extends Check {
             return;
         }
 
+        PlayerData targetData = plugin.getPlayerData(target);
         boolean suspicious = false;
         boolean severe = reachEval != null && !reachEval.isLegal();
         suspicious |= checkAngles(attacker, data, severe);
         suspicious |= checkRepeatedRotationPattern(attacker, data);
         suspicious |= checkMultiTarget(attacker, data, target);
         suspicious |= checkLineOfSight(attacker, target, data, reachEval);
-        suspicious |= checkReachContext(attacker, data, reachEval, suspicious);
+        suspicious |= checkReachContext(attacker, data, targetData, reachEval, suspicious);
 
         if (!suspicious) {
             coolDownScore(data);
@@ -175,47 +176,91 @@ public final class KillAuraCheck extends Check {
         return true;
     }
 
-    private boolean checkReachContext(Player attacker, PlayerData data, ReachCheck.AttackEvaluation reachEval,
-            boolean priorSuspicious) {
+    private boolean checkReachContext(Player attacker, PlayerData data, PlayerData targetData,
+            ReachCheck.AttackEvaluation reachEval, boolean priorSuspicious) {
         if (reachEval == null || reachEval.isLegal()) {
             return false;
         }
-        if (!reachEval.isEnforceableWindow() || reachEval.isTeleportMarkerHit()) {
+        if (!reachEval.isEnforceableWindow() || reachEval.isTeleportMarkerHit() || reachEval.isVelocityGraceWindow()) {
             return false;
         }
-        boolean aimSignal = hasRecentAimAssistSignal(data);
-        if (!priorSuspicious && !aimSignal) {
+        if (isVelocityCombatWindowUncertain(data, targetData)) {
             return false;
         }
-        if (reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS && !aimSignal) {
+        double duplicateLookScore = getAimDuplicateLookScore(data);
+        double moduloScore = getAimModuloScore(data);
+        boolean aimSignal = duplicateLookScore >= 0.85D || moduloScore >= 0.75D;
+        boolean strongReachContext = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.REACH
+                && reachEval.getDirectDistance() >= 3.60D;
+        boolean strongHitboxContext = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS
+                && reachEval.getDirectDistance() >= 2.85D
+                && (priorSuspicious || aimSignal || duplicateLookScore >= 1.35D);
+        if (!priorSuspicious && !aimSignal && !strongReachContext) {
+            return false;
+        }
+        if (reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS && !strongHitboxContext) {
             return false;
         }
 
-        double add = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS ? 0.60D : 0.80D;
+        double add = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS ? 0.55D : 0.75D;
+        if (aimSignal) {
+            add += 0.30D;
+        }
+        if (priorSuspicious) {
+            add += 0.15D;
+        }
+        if (strongReachContext) {
+            add += Math.min(0.55D, (reachEval.getDirectDistance() - 3.2D) * 0.45D);
+        }
+        if (strongHitboxContext) {
+            add += 0.20D;
+        }
         double buffer = slideAndAddScore(data, add, 1.0D);
         String detail = reachEval.getEvidenceType() == ReachCheck.ReachEvidenceType.HITBOX_MISS
                 ? "PACKET_HITBOX dist=" + String.format(Locale.ROOT, "%.2f", reachEval.getDirectDistance())
                 : "PACKET_REACH dist=" + String.format(Locale.ROOT, "%.2f", reachEval.getDirectDistance());
         recordEvidence(data, add, "KILLAURA_PACKET_CONTEXT");
         recordKillAuraCombatEvidence(attacker, data, add, detail);
-        if (buffer > plugin.getConfig().getDouble("checks.KillAura.buffer", 2.0D)) {
+        double threshold = plugin.getConfig().getDouble("checks.KillAura.buffer", 2.0D);
+        if (aimSignal || strongReachContext) {
+            threshold = Math.max(1.25D, threshold - 0.45D);
+        }
+        if (buffer > threshold) {
             flag(attacker, data, add, detail);
         }
         return true;
     }
 
     private boolean hasRecentAimAssistSignal(PlayerData data) {
-        double duplicateLookScore = data.getBuffer("AimDuplicateLook") + data.getViolation("AimDuplicateLook");
-        if (duplicateLookScore >= 1.25D) {
+        if (getAimDuplicateLookScore(data) >= 1.25D) {
             return true;
         }
 
-        double moduloScore = data.getBuffer("AimModulo360") + data.getViolation("AimModulo360");
-        if (moduloScore >= 1.0D) {
+        if (getAimModuloScore(data) >= 1.0D) {
             return true;
         }
 
         return false;
+    }
+
+    private double getAimDuplicateLookScore(PlayerData data) {
+        return data.getBuffer("AimDuplicateLook") + data.getViolation("AimDuplicateLook");
+    }
+
+    private double getAimModuloScore(PlayerData data) {
+        return data.getBuffer("AimModulo360") + data.getViolation("AimModulo360");
+    }
+
+    private boolean isVelocityCombatWindowUncertain(PlayerData attackerData, PlayerData targetData) {
+        long now = System.currentTimeMillis();
+        long graceMillis = plugin.getConfig().getLong("combat.reach-velocity-grace-ms", 400L);
+        if (attackerData.hasPendingVelocityWindow() || (targetData != null && targetData.hasPendingVelocityWindow())) {
+            return true;
+        }
+        if (now - attackerData.getLastVelocityAt() <= graceMillis) {
+            return true;
+        }
+        return targetData != null && now - targetData.getLastVelocityAt() <= graceMillis;
     }
 
     private void recordKillAuraCombatEvidence(Player attacker, PlayerData data, double score, String detail) {

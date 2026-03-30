@@ -67,9 +67,15 @@ final class CombatPipeline {
         long attackCreatedAtNanos = snapshot == null ? 0L : snapshot.getCreatedAtNanos();
         long attackCreatedAtMillis = snapshot == null ? 0L : snapshot.getCreatedAtMillis();
         List<HitboxFrame> attackFrames = attackCreatedAtNanos > 0L
-                ? targetData.getHitboxHistorySnapshot(400L, attackCreatedAtMillis, attackCreatedAtNanos,
-                        ATTACK_HISTORY_FUTURE_SLACK_NANOS)
-                : targetData.getHitboxHistorySnapshot(400L);
+                ? attackerData.getObservedHitboxHistorySnapshot(targetEntityId, 400L, attackCreatedAtMillis,
+                        attackCreatedAtNanos, ATTACK_HISTORY_FUTURE_SLACK_NANOS)
+                : attackerData.getObservedHitboxHistorySnapshot(targetEntityId, 400L);
+        if (attackFrames.isEmpty()) {
+            attackFrames = attackCreatedAtNanos > 0L
+                    ? targetData.getHitboxHistorySnapshot(400L, attackCreatedAtMillis, attackCreatedAtNanos,
+                            ATTACK_HISTORY_FUTURE_SLACK_NANOS)
+                    : targetData.getHitboxHistorySnapshot(400L);
+        }
         if (!attackFrames.isEmpty()) {
             FrameContextSnapshot attackerFrameContext = attackerData.getCurrentFrameContext();
             if (attackerFrameContext != null) {
@@ -98,14 +104,10 @@ final class CombatPipeline {
                     "enforce", String.valueOf(reachEval.isEnforceableWindow())));
         }
 
-        plugin.getServer().getScheduler().runTask(plugin, new Runnable() {
-            @Override
-            public void run() {
-                for (KillAuraCheck check : killAuraChecks) {
-                    check.onUseEntityAttack(attacker, target, attackerData, reachEval);
-                }
-            }
-        });
+        attackerData.setDetectionContext("USE_ENTITY_PACKET", attackerData.getMoveWindow());
+        for (KillAuraCheck check : killAuraChecks) {
+            check.onUseEntityAttack(attacker, target, attackerData, reachEval);
+        }
     }
 
     void onAttackFallback(EntityDamageByEntityEvent event) {

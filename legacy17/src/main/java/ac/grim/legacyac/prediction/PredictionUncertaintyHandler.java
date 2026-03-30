@@ -13,6 +13,7 @@ public final class PredictionUncertaintyHandler {
     private static final double MAX_UTILITY_CORRECTION = 0.05D;
     private static final double MAX_PENDING_CORRECTION = 0.06D;
     private static final double MAX_RECENT_VELOCITY_CORRECTION = 0.18D;
+    private static final double MAX_JUMP_TRANSITION_CORRECTION = 0.04D;
 
     private PredictionUncertaintyHandler() {
     }
@@ -57,7 +58,40 @@ public final class PredictionUncertaintyHandler {
                     plugin.getConfig().getDouble("prediction.budget.recent-velocity", 0.18D));
         }
 
-        double total = terrainLandingCorrection + utilityCorrection + pendingStateCorrection + recentVelocityCorrection;
+        double jumpTransitionCorrection = 0.0D;
+        boolean jumpTakeoff = data.wasOnGround() && !data.isOnGroundNow()
+                && deltaY > 0.34D && data.getLastDeltaXZ() > 0.14D;
+        if (jumpTakeoff) {
+            jumpTransitionCorrection += 0.025D;
+        }
+        boolean landingTransition = !data.wasOnGround() && data.isOnGroundNow()
+                && Math.abs(deltaY) < 0.085D && data.getLastDeltaXZ() > 0.12D;
+        if (landingTransition) {
+            jumpTransitionCorrection += 0.020D;
+        }
+        boolean canonicalJumpArc = data.getLastDeltaXZ() > 0.10D
+                && ((deltaY >= 0.39D && deltaY <= 0.44D)
+                || (deltaY >= 0.30D && deltaY <= 0.35D)
+                || (deltaY >= -0.10D && deltaY <= -0.06D));
+        if (canonicalJumpArc) {
+            jumpTransitionCorrection += 0.018D;
+        }
+        long timeSinceAttack = System.currentTimeMillis() - data.getLastAttackAt();
+        boolean airborneCombatTransition = timeSinceAttack <= 225L && !data.isOnGroundNow()
+                && data.getLastDeltaXZ() > 0.10D
+                && ((deltaY >= 0.30D && deltaY <= 0.44D)
+                || (deltaY >= -0.10D && deltaY <= 0.05D));
+        if (airborneCombatTransition) {
+            jumpTransitionCorrection += 0.022D;
+        }
+        if ((jumpTakeoff || landingTransition) && (context.isRecentUnevenGround() || context.isNearPartialGround()
+                || context.isRecentHeadHit())) {
+            jumpTransitionCorrection += 0.010D;
+        }
+        jumpTransitionCorrection = Math.min(MAX_JUMP_TRANSITION_CORRECTION, jumpTransitionCorrection);
+
+        double total = terrainLandingCorrection + utilityCorrection + pendingStateCorrection
+                + recentVelocityCorrection + jumpTransitionCorrection;
         return Math.min(MAX_TOTAL_CORRECTION, total);
     }
 }

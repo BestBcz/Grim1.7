@@ -419,6 +419,33 @@ public final class PlayerData {
 
     // 闁冲厜鍋撻柍鍏夊亾 Network 闁冲厜鍋撻柍鍏夊亾
 
+    public void recordObservedHitbox(int entityId, double x, double y, double z, double width, double height,
+            boolean teleportMarker, boolean transactionAligned, boolean enforceable, long timestampNanos) {
+        combat.recordObservedHitbox(entityId, x, y, z, width, height, teleportMarker, transactionAligned,
+                enforceable, timestampNanos);
+    }
+
+    public boolean recordObservedRelativeHitbox(int entityId, double deltaX, double deltaY, double deltaZ,
+            double width, double height, boolean teleportMarker, boolean transactionAligned, boolean enforceable,
+            long timestampNanos) {
+        return combat.recordObservedRelativeHitbox(entityId, deltaX, deltaY, deltaZ, width, height, teleportMarker,
+                transactionAligned, enforceable, timestampNanos);
+    }
+
+    public List<HitboxFrame> getObservedHitboxHistorySnapshot(int entityId, long maxAgeMillis) {
+        return combat.getObservedHitboxHistorySnapshot(entityId, maxAgeMillis);
+    }
+
+    public List<HitboxFrame> getObservedHitboxHistorySnapshot(int entityId, long maxAgeMillis,
+            long referenceTimeMillis, long maxTimestampNanos, long futureSlackNanos) {
+        return combat.getObservedHitboxHistorySnapshot(entityId, maxAgeMillis, referenceTimeMillis,
+                maxTimestampNanos, futureSlackNanos);
+    }
+
+    public void clearObservedEntity(int entityId) {
+        combat.clearObservedEntity(entityId);
+    }
+
     public long getLastTransactionRttNanos() {
         return network.getLastTransactionRttNanos();
     }
