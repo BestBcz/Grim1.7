@@ -1,125 +1,231 @@
-<div align="center">
- <h1>GrimAC</h1>
+# GrimLegacyAC for 1.7.10
 
- <div>
-  <a href="https://github.com/GrimAnticheat/Grim/actions/workflows/gradle-publish.yml">
-   <img alt="Workflow" src="https://img.shields.io/github/actions/workflow/status/GrimAnticheat/Grim/gradle-publish.yml?style=flat&logo=github"/>
-  </a>&nbsp;&nbsp;
-  <a href="https://modrinth.com/plugin/grimac">
-   <img alt="Modrinth" src="https://img.shields.io/modrinth/v/LJNGWSvH?style=flat&label=version&logo=modrinth">
-  </a>&nbsp;&nbsp;
-  <a href="https://modrinth.com/plugin/grimac#download">
-   <img alt="Downloads" src="https://img.shields.io/modrinth/dt/LJNGWSvH?style=flat&logo=modrinth&label=downloads&link=https%3A%2F%2Fmodrinth.com%2Fplugin%2Fgrimac%23download">
-  </a>&nbsp;&nbsp;
-  <a href="https://discord.grim.ac">
-   <img alt="Discord" src="https://img.shields.io/discord/811396969670901800?style=flat&label=discord&logo=discord">
-  </a>
- </div>
- <br>
-</div>
+> 面向 `Spigot 1.7.10` 的实验性反作弊插件实现。
+> 目标不是把新版本 Grim 直接“移植”过来，而是在旧协议和旧服务端限制下，尽量复现 `packet-first`、`prediction-first`、`latency-aware` 这套设计思路。
 
-GrimAC is an open source Minecraft anticheat designed to support the latest versions of Minecraft.
-It currently supports minecraft versions 1.8–1.21. Geyser players are fully exempt from the anticheat to prevent false positives.
-This project is considered feature-complete for the 2.0 (open-source) branch. If you would like a bug fix or enhancement and cannot sponsor the work, pull requests are welcome.
-A premium version is planned, which will offer additional subscription-based paid checks, such as heuristics.
+## 项目定位
 
-## Downloads
+`legacy17` 是仓库中独立的 1.7.10 子模块，主要面向以下场景：
 
-- Latest updates:
-  - **[Modrinth](https://modrinth.com/plugin/grimac)** *(recommended)*
-  - GitHub
-  artifacts: [Bukkit](https://nightly.link/GrimAnticheat/Grim/workflows/gradle-publish/2.0/grimac-bukkit.zip), [Fabric](https://nightly.link/GrimAnticheat/Grim/workflows/gradle-publish/2.0/grimac-fabric.zip) *(bleeding edge)*
-- Major releases only:
-  - ~~[Hangar](https://hangar.papermc.io/GrimAnticheat/GrimAnticheat)~~
-  - ~~[SpigotMC](https://www.spigotmc.org/resources/grim-anticheat.99923/)~~
+- 仍在维护 `Spigot 1.7.10` 的 PvP / 小游戏 / 老整合包服务器
+- 需要比传统事件流反作弊更强的包级观测能力
+- 需要在高延迟、低 TPS、珍珠位移、鱼竿拉扯等旧版本高误判场景下，保留一定解释性和调试能力
 
-## Requirements & Installation
+当前实现更接近“可持续演进的技术内核”，而不是一个已经完全稳定、覆盖全部边界条件的商用成品。上线前建议先在测试服压测和回归。
 
-- Java 17 or higher. *For more details, see [Updating-to-Java-17](https://github.com/GrimAnticheat/Grim/wiki/Updating-to-Java-17).*
-- A Spigot, Paper, Folia, or Fabric server environment. *For more details, see [Supported-environments](https://github.com/GrimAnticheat/Grim/wiki/Supported-environments).*
+## 主要能力
 
-If you use a proxy such as Velocity or Bungeecord:
-- If you use Geyser, Floodgate must be installed on the backend server (where Grim is) so Grim can access the Floodgate API.
-- If you use ViaVersion, it must be installed on the backend server (where Grim is) ONLY.
-  Grim does not support having ViaVersion installed on the proxy, even if it is also installed on the backend.
+- 无法使用的功能已经在预设配置中关闭
+### 移动与状态类
 
-## Resources
+- `Speed`
+- `Fly`
+- `Phase` _*无法使用_
+- `Timer`
+- `Jesus` _*无法使用_
+- `InventoryMove`
+- `NoSlow`
+- `Prediction`
+- `GroundSpoof`
 
-- For documentation and examples visit the [Wiki](https://github.com/GrimAnticheat/Grim/wiki).
-- For answers to commonly asked questions visit the [FAQ](https://github.com/GrimAnticheat/Grim/wiki/FAQ).
-- For community support and project discussion join our [Discord](https://discord.grim.ac).
+### 战斗类
 
-## Pull Requests
+- `Reach`
+- `KillAura`
+- `AutoClicker` _*无法使用_
+- `Velocity`
+- `AimModulo360`
+- `AimDuplicateLook`
 
-See [Contributing](CONTRIBUTING.md) for more information about contributing and what our guidelines
-are.
+### 交互与世界类
 
-## Developer Plugin API
+- `FastPlace`
+- `FastBreak`
+- `FastUse`
+- `FarPlace` _*无法使用_
+- `FabricatedPlace`
+- `DuplicateRotPlace`
+- `AirLiquidPlace` _*无法使用_
+- `PositionPlace`
+- `RotationPlace`
+- `MultiPlace`
+- `FarBreak`
+- `RotationBreak` _*无法使用_
+- `AirLiquidBreak` _*无法使用_
+- `MultiBreak`
 
-Grim's plugin API allows you to integrate Grim into your own plugins. Visit
-the [plugin API repository](https://github.com/GrimAnticheat/GrimAPI) for the source code and more
-information.
+### 网络与异常包类
 
-## Compiling From Source
+- `BadPacketsA/C/D/E/F/G/I/L/O/Q`
+- `CrashA`
+- 交易包 RTT 跟踪
+- KeepAlive / transaction 对齐
+- 包级战斗、放置、挖掘、世界状态采集
 
-1. `git clone https://github.com/GrimAnticheat/Grim.git`
-2. `cd Grim`
-3. `./gradlew build`
-4. The final jars will compile into the `<platform>/build/libs` folders
+## 实现思路
 
-## Grim Supremacy
+### 1. Packet-first 输入链路
 
-What makes Grim stand out against other anticheats?
+优先使用 `ProtocolLib` 直接监听 1.7.10 客户端关键包：
 
-### Movement Simulation Engine
+- 移动包：`FLYING` / `POSITION` / `LOOK` / `POSITION_LOOK`
+- 战斗包：`USE_ENTITY`
+- 对齐包：`TRANSACTION` / `KEEP_ALIVE`
+- 方块交互：`BLOCK_PLACE` / `BLOCK_DIG`
+- 服务端反馈：`POSITION` / `ENTITY_VELOCITY` / `BLOCK_CHANGE` / `MAP_CHUNK`
 
-* We have a 1:1 replication of the player's possible movements
-    * This covers everything from basic walking, swimming, knockback, cobwebs, to bubble columns
-    * It even covers riding entities from boats to pigs to striders
-* Built upon covering edge cases to confirm accuracy
-* 1.13+ clients on 1.13+ servers, 1.12- clients on 1.13+ servers, 1.13+ clients on 1.12- servers,
-  and 1.12- clients on 1.12- servers are all supported regardless of the large technical changes
-  between these versions.
-* The order of collisions depends on the client version and is correct
-* Accounts for minor bounding box differences between versions, for example:
-    * Single glass panes will be a + shape for 1.7-1.8 players and * for 1.9+ players
-    * 1.13+ clients on 1.8 servers see the + glass pane hitbox due to ViaVersion
-    * Many other blocks have this extreme attention to detail.
-    * Waterlogged blocks do not exist for 1.12 or below players
-    * Blocks that do not exist in the client's version use ViaVersion's replacement block
-    * Block data that cannot be translated to previous versions is replaced correctly
-    * All vanilla collision boxes have been implemented
+入口在 `src/main/java/ac/grim/legacyac/LegacyAntiCheatPlugin.java` 和 `src/main/java/ac/grim/legacyac/network/ProtocolLibBridgeManager.java`。
 
-### Fully asynchronous and multithreaded design
+如果 `ProtocolLib` 不可用，或者包反射读取降级，插件会自动退回到 Netty / Bukkit 事件路径，而不是直接失效。
 
-* All movement checks and the overwhelming majority of listeners run on the netty thread
-* The anticheat can scale to many hundreds of players, if not more
-* Thread safety is carefully thought out
-* The next core allows for this design
+### 2. Movement pipeline
 
-### Full world replication
+移动检查不是直接挂在 `PlayerMoveEvent` 上，而是走一条按帧处理的流水线：
 
-* The anticheat keeps a replica of the world for each player
-* The replica is created by listening to chunk data packets, block places, and block changes
-* On all versions, chunks are compressed to 16-64 kb per chunk using palettes
-* Using this cache, the anticheat can safely access the world state
-* Per player, the cache allows for multithreaded design
-* Sending players fake blocks with packets is safe and does not lead to falses
-* The world is recreated for each player to allow lag compensation
-* Client sided blocks cause no issues with packet based blocks. Block glitching does not false the
-  anticheat.
+`MovementFrame -> PlayerData 状态更新 -> 预算计算 -> Prediction -> Post checks -> Combat queue / fallback`
 
-### Latency compensation
+实现集中在 `src/main/java/ac/grim/legacyac/check/CheckManager.java` 和 `src/main/java/ac/grim/legacyac/check/MovementPipeline.java`。
 
-* World changes are queued until they reach the player
-* This means breaking blocks under a player does not false the anticheat
-* Everything from flying status to movement speed will be latency compensated
+这个链路包含几件关键事情：
 
-### Inventory compensation
+- 优先消费包级 movement frame
+- Bukkit `MoveEvent` 只在包数据 stale 或不可用时兜底
+- 传送未对齐时会冻结部分检测，减少 TP / 珍珠相关误报
+- prediction miss 时允许走保守的 `minimal-post` 检查，而不是整条链路直接空跑
 
-* The player's inventory is tracked to prevent ghost blocks at high latency, and other errors
+### 3. 统一容差预算
 
-### Secure by design, not obscurity
+旧版本最容易出问题的，不是“有没有检查项”，而是容差到底该怎么给。
+`legacy17` 把 RTT、jitter、TPS、最近受击、液体、传送、边缘卡脚、鱼竿拉扯等因素统一收敛到 `ToleranceBudgetEngine`。
 
-* All systems are designed to be highly secure and mathematically impossible to bypass
-* For example, the prediction engine knows all possible movements and cannot be bypassed
+代码在 `src/main/java/ac/grim/legacyac/tolerance/ToleranceBudgetEngine.java`。
+
+每一帧都会生成一份预算快照，供不同检查共享，主要输出：
+
+- `movement allowance`
+- `combat reach margin`
+- `velocity response slack`
+
+这意味着检查之间不再各自重复“猜”一份延迟容差，调参也更容易解释。
+
+### 4. 1.7.10 预测模型
+
+移动预测引擎会根据旧版本物理规则生成候选速度并比对真实移动结果，核心考虑：
+
+- 1.7.10 的重力、摩擦和空气阻力
+- 冲刺跳跃方向修正
+- 药水效果
+- 冰面、液体、梯子、台阶、边缘等场景
+- 受击后速度窗口
+
+实现见 `src/main/java/ac/grim/legacyac/prediction/LegacyPredictionEngine.java`。
+
+### 5. Combat 回溯与命中盒
+
+战斗链路不是只看一次事件，而是会结合：
+
+- 攻击包触发时序
+- 双方 transaction RTT
+- 历史 hitbox 记录
+- 动态回溯窗口
+
+实现集中在 `src/main/java/ac/grim/legacyac/check/CombatPipeline.java`。
+
+`Reach` 和 `KillAura` 共用这条链路，这样高延迟条件下的命中判定会更接近“当时看见的目标位置”。
+
+## 调试与回归
+
+插件不是只输出一个 flag，而是尽量保留证据链：
+
+- `/glac debug <player>`：输出 pipeline 与预算调试信息
+- `/glac profile <player>`：查看玩家各检查 VL、RTT、Velocity 窗口等状态
+- `/glac dump <player>`：导出结构化信息，便于回归比对
+
+对应 QA 场景已经整理在 `qa-scenarios.md`，例如：
+
+- 斜跳加速
+- 格挡移动
+- 高处落地
+- 鱼竿拉扯
+- 液体受击
+- 珍珠位移
+- 传送后首包
+- 库存移动
+
+插件停服时还会输出一份 regression report，用来判断改动是否引入更高误报或更慢触发。
+
+## 编译
+
+### 前置要求
+
+- `Java 8`
+- 仓库根目录自带的 Gradle Wrapper
+- 以下依赖文件存在于 `legacy17/libs/`
+  - `spigot-server-1.7.10-R0.1-SNAPSHOT.jar`
+  - `ProtocolLib1.7.jar`
+
+### 构建命令
+
+Linux / macOS:
+
+```bash
+./gradlew :legacy17:build
+```
+
+Windows:
+
+```powershell
+.\gradlew.bat :legacy17:build
+```
+
+产物输出目录：
+
+```text
+legacy17/build/libs/
+```
+
+## 安装
+
+1. 将编译出的 `legacy17` jar 放入服务器 `plugins/` 目录。
+2. 推荐同时安装与 1.7.10 匹配的 `ProtocolLib`，以启用完整包级链路。
+3. 首次启动后检查生成的配置文件，再按服务器环境微调：
+   - `pipeline.*`
+   - `prediction.budget.*`
+   - `transaction.*`
+   - `adaptive-lag.*`
+   - `checks.<CheckName>.*`
+
+如果你要优先压低误报，建议先调：
+
+- `checks.Speed.*`
+- `checks.Reach.*`
+- `checks.Velocity.*`
+- `prediction.budget.*`
+
+而不是一开始就把所有阈值整体抬高。
+
+## 命令与权限
+
+### 命令
+
+- `/glac info`
+- `/glac alerts`
+- `/glac reload`
+- `/glac profile <player>`
+- `/glac debug <player>`
+- `/glac dump <player>`
+
+### 权限
+
+- `grimlegacy.command`
+- `grimlegacy.alerts`
+- `grimlegacy.bypass`
+
+## 兼容性与状态
+
+- 目标平台：`Spigot 1.7.10`
+- `ProtocolLib`：推荐安装，非强制
+- 当前状态：实验性 / 开发中
+
+如果你的目标是“老版本服也要尽量接近 Grim 的检测方式”，这个模块就是为这个方向准备的。
+如果你的目标是“开箱即用、覆盖所有边界、几乎零调参”，那它目前还不是这个定位。
