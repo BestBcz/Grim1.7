@@ -202,7 +202,7 @@ checks:
       - "kick %player% Fly cheat (%check% VL:%vl%)"
 
   Phase:
-    enabled: true
+    enabled: false
     max-vl: 6.0
     setback: true
     buffer: 1.5
@@ -229,7 +229,7 @@ checks:
       - "kick %player% Reach cheat (%check% VL:%vl%)"
 
   AutoClicker:
-    enabled: true
+    enabled: false
     max-vl: 10.0
     max-cps: 17
     max-flat-jitter-ms: 2
@@ -305,7 +305,7 @@ checks:
       - "kick %player% Velocity cheat (%check% VL:%vl%)"
 
   Jesus:
-    enabled: true
+    enabled: false
     max-vl: 8.0
     setback: true
     max-water-speed: 0.18
@@ -315,7 +315,7 @@ checks:
       - "kick %player% Jesus cheat (%check% VL:%vl%)"
 
   FastPlace:
-    enabled: true
+    enabled: false
     max-vl: 8.0
     setback: false
     max-place-per-second: 14
@@ -408,7 +408,17 @@ checks:
       - "kick %player% Aim cheat (%check% VL:%vl%)"
 
   RotationBreak:
-    enabled: true
+    enabled: false
+    max-vl: 8.0
+    setback: false
+    max-reach: 5.2
+    buffer: 1.25
+    punish-vl: 20
+    punish-commands:
+      - "kick %player% RotationBreak (%check% VL:%vl%)"
+      
+  RotationPlace:
+    enabled: false
     max-vl: 8.0
     setback: false
     max-reach: 5.2
@@ -437,7 +447,7 @@ checks:
       - "kick %player% AirLiquidBreak (%check% VL:%vl%)"
 
   MultiBreak:
-    enabled: false
+    enabled: true
     max-vl: 8.0
     setback: false
     max-interval-ms: 25
@@ -465,7 +475,7 @@ checks:
       - "kick %player% Scaffold (%check% VL:%vl%)"
 
   AirLiquidPlace:
-    enabled: true
+    enabled: false
     max-vl: 8.0
     setback: false
     punish-vl: 16
@@ -473,7 +483,7 @@ checks:
       - "kick %player% AirLiquidPlace (%check% VL:%vl%)"
 
   FarPlace:
-    enabled: true
+    enabled: false
     max-vl: 8.0
     setback: false
     max-reach: 5.0
